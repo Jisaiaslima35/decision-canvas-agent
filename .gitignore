@@ -1,0 +1,27 @@
+# Credenciais e bancos — NUNCA comitar
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Backups
+*.bak
+*.bak-*
+.bak*
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Front/build (o frontend é servido pelo backend, sem build)
+node_modules/
+dist/
+build/
+
+# Uploads gerados em runtime (prints de investigação)
+static/uploads/

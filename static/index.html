@@ -1,0 +1,1824 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Centro de Decisões Empresariais - Decision Canvas Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            canvasDark: '#0d1117',
+            canvasPanel: '#161b22',
+            canvasCard: '#21262d',
+            canvasBorder: '#30363d',
+            emeraldAccent: '#10b981',
+            crimsonRisk: '#ef4444',
+            amberAlert: '#f59e0b',
+            cyanTech: '#06b6d4',
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0d1117;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #484f58;
+    }
+    .pulse-ring {
+      animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    .mic-recording {
+      animation: mic-pulse 1s ease-in-out infinite alternate;
+      background-color: #ef4444 !important;
+      color: #ffffff !important;
+      border-color: #f87171 !important;
+    }
+    @keyframes mic-pulse {
+      0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      100% { transform: scale(1.1); box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+    }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col select-none">
+
+  <!-- TOPO BAR / HEADER GERAL -->
+  <header class="h-14 border-b border-canvasBorder bg-canvasPanel flex items-center justify-between px-4 z-20">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center font-bold text-black shadow-lg shadow-emerald-500/20">
+        <svg class="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="font-bold text-sm text-gray-100 flex items-center gap-2">
+          CENTRO DE DECISÕES
+          <span class="text-[10px] font-mono tracking-wider px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 uppercase">
+            9Router Multimodal
+          </span>
+        </h1>
+        <p class="text-[11px] text-gray-400">HTTPS Cloudflare • Visão Gemini 2.5 • Português Brasileiro (pt-BR)</p>
+      </div>
+    </div>
+
+    <!-- Controles de Modelo, Conexão e Status -->
+    <div class="flex items-center space-x-3">
+      <!-- Seletor de Modelo 9Router -->
+      <div class="flex items-center bg-canvasDark border border-canvasBorder rounded-md px-2.5 py-1 text-xs">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 mr-2 pulse-ring"></span>
+        <select id="modelSelector" class="bg-transparent text-gray-200 focus:outline-none cursor-pointer pr-1">
+          <option value="gemini/gemini-2.5-flash" selected>Gemini 2.5 Flash (9Router Visão)</option>
+          <option value="gemini/gemini-3.6-flash">Gemini 3.6 Flash (9Router)</option>
+          <option value="gemini/gemini-3.1-pro-preview">Gemini 3.1 Pro (9Router Raciocínio)</option>
+          <option value="groq/meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick (Visão)</option>
+          <option value="autonomous-engine">Fallback Local Autônomo</option>
+        </select>
+      </div>
+
+      <!-- Badge de Status 9Router & HTTPS -->
+      <div id="serviceStatusBadge" class="hidden sm:flex items-center space-x-2 px-2.5 py-1 rounded bg-canvasDark border border-canvasBorder text-xs text-gray-300 font-mono">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        <span id="serviceStatusText">9Router Conectado</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- BARRA DA SALA (link + presenca + WS) -->
+  <div id="roomBar" class="shrink-0 border-b border-canvasBorder bg-canvasPanel/70 px-4 py-2 flex items-center gap-2 flex-wrap text-xs">
+    <span class="font-semibold text-gray-200 flex items-center gap-1.5">🔗 Link da sala:</span>
+    <input id="roomLinkInput" readonly class="flex-1 min-w-[220px] bg-canvasDark border border-canvasBorder rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-cyan-300 focus:outline-none" value="">
+    <button onclick="copyRoomLink()" class="px-3 py-1.5 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-200 transition">Copiar Link</button>
+    <span id="roomCopyFeedback" class="hidden text-emerald-400 text-[11px]">Copiado!</span>
+    <span class="ml-auto flex items-center gap-2">
+      <span id="wsStatusDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
+      <span id="wsStatusText" class="text-gray-400">Conectando...</span>
+      <span id="presenceBadge" class="px-2 py-0.5 rounded-full bg-canvasCard border border-canvasBorder text-gray-300 font-mono">● 1 online</span>
+    </span>
+    <span id="authArea" class="flex items-center gap-2"></span>
+  </div>
+
+  <!-- CORPO PRINCIPAL - SPLIT SCREEN (35% ESQUERDA | 65% DIREITA) -->
+  <div id="appScroll" class="flex-1 overflow-y-auto flex flex-col min-h-0">
+  <main class="flex shrink-0 h-[62vh] min-h-[460px] overflow-hidden">
+    
+    <!-- LADO ESQUERDO: CONVERSAÇÃO / LIVE / PROMPTS / PRINTS (35%) -->
+    <section class="w-full md:w-[35%] flex flex-col border-r border-canvasBorder bg-canvasDark/95">
+      
+      <!-- Box de Contexto de Negócio (Colapsável) -->
+      <div class="p-3 border-b border-canvasBorder bg-canvasPanel/40">
+        <div class="flex items-center justify-between text-xs text-gray-300 mb-1.5 cursor-pointer" onclick="toggleContextBox()">
+          <span class="font-semibold flex items-center gap-1.5 text-gray-200">
+            <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+            Contexto do Negócio / Ebook
+          </span>
+          <span id="contextToggleIcon" class="text-gray-400 text-[10px]">▼ Expandir</span>
+        </div>
+        <div id="contextBoxContent" class="hidden mt-2 space-y-2">
+          <textarea id="businessContextInput" rows="2" class="w-full bg-canvasDark border border-canvasBorder rounded p-2 text-xs text-gray-200 focus:border-emerald-500 focus:outline-none font-mono" placeholder="Ex: Negócio: Leitor Inteligente (PWA Ebooks + Professor IA). Ticket R$ 5-13/livro. Churn nos últimos 30 dias em 12%..."></textarea>
+          <div class="flex justify-between items-center text-[10px] text-gray-400">
+            <span>Injetado no prompt para contextualizar a IA</span>
+            <button onclick="saveContextLocal()" class="text-emerald-400 hover:underline">Salvar Local</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Action Prompts (100% em Português) -->
+      <div class="p-2.5 border-b border-canvasBorder bg-canvasPanel/20 overflow-x-auto">
+        <div class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1.5 flex items-center justify-between">
+          <span>Gatilhos de Decisão Estratégica</span>
+          <span class="text-emerald-400 text-[10px]">Visão & Decisão</span>
+        </div>
+        <div class="flex gap-1.5 overflow-x-auto pb-1" id="templateButtons">
+          <button onclick="applyTemplate(0)" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>🎯</span> Auditoria de Gargalos
+          </button>
+          <button onclick="applyTemplate(1)" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>📅</span> Plano de Ação (30 Dias)
+          </button>
+          <button onclick="applyTemplate(2)" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>⚠️</span> Recuperação de Clientes
+          </button>
+          <button onclick="applyTemplate(3)" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>📖</span> Leitor Inteligente: Resumo & Ação
+          </button>
+          <button onclick="applyTemplate(4)" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>📷</span> Visão de Tela & Navegação
+          </button>
+          <button onclick="startInvestigar()" class="whitespace-nowrap text-xs bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-200 px-2.5 py-1.5 rounded border border-cyan-800 transition flex items-center gap-1.5">
+            <span>🔍</span> Investigar Concorrente / Web
+          </button>
+        </div>
+      </div>
+
+      <!-- Mensagens / Histórico da Conversação -->
+      <div id="chatHistory" class="flex-1 overflow-y-auto p-4 space-y-3.5 text-sm">
+        
+        <!-- Boas-vindas do Agente -->
+        <div class="flex items-start space-x-2.5">
+          <div class="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-xs font-bold text-white shrink-0 shadow">
+            IA
+          </div>
+          <div class="bg-canvasPanel border border-canvasBorder rounded-2xl rounded-tl-sm p-3.5 max-w-[90%] text-gray-200 text-xs leading-relaxed shadow-sm">
+            <p class="font-semibold text-emerald-400 mb-1 flex items-center gap-1.5">
+              <span>●</span> Centro de Decisões Multimodal Conectado
+            </p>
+            Olá! Estou operando integrado ao 9Router com o Gemini 2.5 de Visão e Raciocínio. Você pode enviar áudios, colar prints da sua tela direto com <kbd class="px-1.5 py-0.5 rounded bg-canvasDark border border-canvasBorder text-[10px] font-mono">Ctrl+V</kbd> ou pedir análises executivas para gerar recursos na **Área de Trabalho** à direita.
+            <div class="mt-2 text-[11px] text-gray-400 border-t border-canvasBorder/60 pt-1.5">
+              💡 Dica: Cole um print da sua interface para receber um guia de navegação passo a passo sem sobrecarga.
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Área de Preview de Imagem / Print Anexado -->
+      <div id="imagePreviewContainer" class="hidden px-3 pt-2 bg-canvasPanel border-t border-canvasBorder flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <img id="imagePreviewImg" src="" alt="Print Anexado" class="w-12 h-12 object-cover rounded-lg border border-emerald-500 shadow-md">
+          <div>
+            <span class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-semibold block">Print Anexado</span>
+            <span id="imagePreviewName" class="text-xs text-gray-300 truncate max-w-[180px] block">captura.png</span>
+          </div>
+        </div>
+        <button onclick="removeAttachedImage()" class="p-1 rounded-md text-gray-400 hover:text-red-400 hover:bg-canvasCard transition" title="Remover Print">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Barra de Input, Clipe de Print e Microfone -->
+      <div class="p-3 border-t border-canvasBorder bg-canvasPanel">
+        <form id="chatForm" onsubmit="handleChatSubmit(event)" class="space-y-2">
+          
+          <input type="file" id="fileInput" accept="image/*" class="hidden" onchange="handleFileSelected(event)">
+
+          <div class="relative flex items-center">
+            <textarea
+              id="promptInput"
+              rows="2"
+              class="w-full bg-canvasDark border border-canvasBorder rounded-xl pl-3 pr-28 py-2.5 text-xs text-gray-100 placeholder-gray-500 focus:outline-none focus:border-emerald-500 transition resize-none font-sans"
+              placeholder="Digite, cole um print com Ctrl+V ou use a voz..."
+              onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleChatSubmit(event); }"
+            ></textarea>
+
+            <div class="absolute right-2 flex items-center space-x-1">
+              
+              <!-- Botão Anexar Imagem / Print (📎) -->
+              <button
+                type="button"
+                onclick="document.getElementById('fileInput').click()"
+                title="Anexar print ou imagem (Ctrl+V também funciona)"
+                class="w-7 h-7 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-300 hover:text-cyan-400 flex items-center justify-center transition"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                </svg>
+              </button>
+
+              <!-- Botão Live Voice (Microfone com HTTPS Nativo) -->
+              <button
+                type="button"
+                id="voiceBtn"
+                onclick="toggleAudioRecording()"
+                title="Gravar Voz (Web Speech nativo)"
+                class="w-7 h-7 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-300 hover:text-emerald-400 flex items-center justify-center transition"
+              >
+                <svg id="micIcon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              </button>
+
+              <!-- Botão Enviar -->
+              <button
+                type="submit"
+                id="submitBtn"
+                class="w-7 h-7 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black flex items-center justify-center font-bold shadow-md shadow-emerald-600/30 transition disabled:opacity-50"
+              >
+                <svg class="w-3.5 h-3.5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              </button>
+
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-[11px] text-gray-400 px-1">
+            <span class="flex items-center gap-1.5">
+              <span id="voicePulseIndicator" class="hidden w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+              <span id="voiceStatusLabel">Microfone & Câmera prontos</span>
+            </span>
+            <span class="text-[10px] text-gray-500 font-mono">Suporta colar print com Ctrl+V</span>
+          </div>
+
+        </form>
+      </div>
+
+    </section>
+
+    <!-- LADO DIREITO: ÁREA DE TRABALHO / CANVAS DINÂMICO (65%) -->
+    <section class="hidden md:flex flex-1 flex-col bg-canvasDark overflow-hidden">
+      
+      <!-- Header do Canvas -->
+      <div class="h-12 border-b border-canvasBorder bg-canvasPanel/70 px-4 flex items-center justify-between">
+        
+        <div class="flex items-center space-x-3">
+          <div class="flex items-center space-x-2">
+            <div class="w-2.5 h-2.5 rounded-sm bg-emerald-400 rotate-45"></div>
+            <h2 class="text-xs font-bold text-gray-200 uppercase tracking-wider">
+              Área de Trabalho / Canvas Executivo
+            </h2>
+          </div>
+          <span id="resourceBadge" class="hidden text-[10px] px-2 py-0.5 rounded-full font-mono bg-canvasCard border border-canvasBorder text-emerald-400">
+            Recurso Ativo
+          </span>
+        </div>
+
+        <!-- Botões de Ação no Canvas -->
+        <div class="flex items-center space-x-2">
+          
+          <div id="resourceHistoryContainer" class="hidden items-center space-x-1">
+            <span class="text-[10px] text-gray-400 font-mono">Histórico:</span>
+            <select id="resourceHistorySelect" onchange="switchResource(this.value)" class="bg-canvasDark border border-canvasBorder text-gray-300 text-xs rounded px-2 py-1 focus:outline-none">
+            </select>
+          </div>
+
+          <button onclick="exportCurrentResource()" title="Exportar dados do Canvas" class="text-xs bg-canvasCard hover:bg-canvasBorder text-gray-300 px-2.5 py-1 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Exportar
+          </button>
+
+          <button onclick="resetCanvasToVoid()" title="Voltar ao estado vazio" class="text-xs bg-canvasCard hover:bg-red-950/60 hover:text-red-400 text-gray-400 px-2.5 py-1 rounded border border-canvasBorder transition">
+            Limpar
+          </button>
+
+        </div>
+
+      </div>
+
+      <!-- Conteúdo do Canvas (Dinâmico) -->
+      <div id="canvasBody" class="flex-1 overflow-y-auto p-6 flex flex-col justify-center items-center">
+        
+        <!-- ESTADO VOID / VAZIO -->
+        <div id="voidState" class="max-w-md text-center p-8 border border-dashed border-canvasBorder/80 rounded-2xl bg-canvasPanel/20">
+          
+          <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-canvasCard border border-canvasBorder flex items-center justify-center text-gray-500 shadow-inner">
+            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+            </svg>
+          </div>
+
+          <span class="text-[10px] font-mono uppercase tracking-widest text-emerald-400 bg-emerald-950/70 border border-emerald-800/50 px-2.5 py-0.5 rounded-full">
+            Área de Trabalho Pronta
+          </span>
+
+          <h3 class="mt-3 text-base font-semibold text-gray-200">
+            O Canvas Inicia Vazio
+          </h3>
+
+          <p class="mt-2 text-xs text-gray-400 leading-relaxed">
+            Conforme você conversa com a IA ou analisa prints da interface, este painel se preencherá de forma dinâmica com matrizes de decisão, guias passo a passo e planos de 30 dias.
+          </p>
+
+          <div class="mt-5 grid grid-cols-2 gap-2 text-left">
+            <div class="bg-canvasCard/80 border border-canvasBorder p-2.5 rounded-lg">
+              <div class="text-[11px] font-semibold text-gray-200">Plano de 30 Dias</div>
+              <div class="text-[10px] text-gray-400">Fases, metas e KPIs</div>
+            </div>
+            <div class="bg-canvasCard/80 border border-canvasBorder p-2.5 rounded-lg">
+              <div class="text-[11px] font-semibold text-gray-200">Matriz de Gargalos</div>
+              <div class="text-[10px] text-gray-400">Auditoria e retenção de churn</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div id="renderedResourceContainer" class="hidden w-full h-full max-w-5xl flex-1 flex flex-col space-y-4">
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+    <!-- BLOCO 2: MONACO EDITOR + TERMINAL PISTON -->
+    <section id="bloco2" class="shrink-0 h-[380px] border-t border-canvasBorder grid md:grid-cols-2 bg-canvasDark">
+      <div class="flex flex-col border-r border-canvasBorder min-h-0">
+        <div class="h-11 flex items-center justify-between px-3 border-b border-canvasBorder bg-canvasPanel/70 gap-2">
+          <div class="flex items-center gap-1" id="monacoTabs">
+            <button data-lang="python" onclick="setMonacoLang('python')" class="monaco-tab px-2.5 py-1 rounded text-xs border border-canvasBorder">Python</button>
+            <button data-lang="javascript" onclick="setMonacoLang('javascript')" class="monaco-tab px-2.5 py-1 rounded text-xs border border-canvasBorder">JavaScript</button>
+            <button data-lang="php" onclick="setMonacoLang('php')" class="monaco-tab px-2.5 py-1 rounded text-xs border border-canvasBorder">PHP</button>
+            <button data-lang="text" onclick="setMonacoLang('text')" class="monaco-tab px-2.5 py-1 rounded text-xs border border-canvasBorder">Texto</button>
+          </div>
+          <span id="monacoTypingBadge" class="hidden text-[11px] text-cyan-300 truncate max-w-[180px]"></span>
+          <button id="calcBtn" onclick="runMetricsCalc()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black text-xs font-bold shadow-md shadow-emerald-600/30 transition disabled:opacity-50">▶ Calcular Métricas</button>
+        </div>
+        <div id="monacoContainer" class="flex-1 min-h-0"></div>
+        <textarea id="monacoFallback" class="hidden flex-1 min-h-0 w-full bg-canvasDark text-gray-100 font-mono text-xs p-3 focus:outline-none resize-none"></textarea>
+      </div>
+      <div class="flex flex-col min-h-0">
+        <div class="h-11 flex items-center justify-between px-3 border-b border-canvasBorder bg-canvasPanel/70 gap-2">
+          <span class="text-xs font-semibold text-gray-200">Terminal de Saída do Piston</span>
+          <span class="flex items-center gap-2">
+            <span id="calcMeta" class="text-[10px] font-mono text-gray-500"></span>
+            <button onclick="sendCalcToCanvas()" class="px-2.5 py-1 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-200 text-xs transition">📊 Enviar ao Canvas</button>
+          </span>
+        </div>
+        <pre id="pistonOutput" class="flex-1 overflow-y-auto p-3 text-xs font-mono text-gray-200 whitespace-pre-wrap">Pressione ▶ Calcular Métricas para executar o código no Piston.</pre>
+      </div>
+    </section>
+
+    <!-- BLOCO 3: SALA DE COMUNICAÇÃO COLETIVA -->
+    <section id="bloco3" class="shrink-0 h-[440px] border-t border-canvasBorder flex flex-col bg-canvasDark">
+      <div class="flex items-center gap-2 px-3 py-2 border-b border-canvasBorder bg-canvasPanel/70 flex-wrap text-xs">
+        <span class="font-semibold text-gray-200">🎥 Sala de Comunicação Coletiva</span>
+        <div class="flex rounded-lg border border-canvasBorder overflow-hidden">
+          <button id="videoBtnChitchatter" onclick="setVideoMode('chitchatter')" class="px-3 py-1.5 font-semibold">Chitchatter Free</button>
+          <button id="videoBtnDaily" onclick="setVideoMode('daily')" class="px-3 py-1.5">Daily.co HD</button>
+        </div>
+        <input id="videoNameInput" value="Participante" class="bg-canvasDark border border-canvasBorder rounded-lg px-2.5 py-1.5 text-xs text-gray-100 w-32 focus:outline-none focus:border-emerald-500" placeholder="Seu nome">
+        <button onclick="reconnectVideo()" class="px-3 py-1.5 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-200 transition">🔄 Reconectar Vídeo</button>
+        <span class="text-[11px] text-gray-500">O chat da sala fica dentro do vídeo (Chitchatter) — todos na mesma sala conversam ali.</span>
+        <span id="videoStatusText" class="text-[11px] text-cyan-300"></span>
+      </div>
+      <iframe id="videoFrame" class="flex-1 w-full border-0 min-h-0" allow="camera; microphone; fullscreen; display-capture"></iframe>
+    </section>
+  </div>
+
+  <!-- JAVASCRIPT PRINCIPAL / ROTAS DINÂMICAS, 9ROUTER, VISÃO CLIPBOARD E ÁUDIO -->
+  <script>
+    // DETECÇÃO AUTOMÁTICA DE BASE DE API (SUPORTA RAIZ '/' E SUBPATH '/decision/')
+    const API_BASE = (() => {
+      let p = window.location.pathname || '';
+      if (p.endsWith('/')) p = p.slice(0, -1);
+      return p;
+    })();
+
+    function getApiUrl(endpoint) {
+      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+      return `${API_BASE}${cleanEndpoint}`;
+    }
+
+    const state = {
+      model: 'gemini/gemini-2.5-flash',
+      attachedImageBase64: null,
+      businessContext: localStorage.getItem('DECISION_BUSINESS_CONTEXT') || '',
+      history: [],
+      generatedResources: [],
+      activeResourceIndex: -1,
+      isRecordingVoice: false,
+      speechRecognition: null,
+      mediaRecorder: null,
+      audioChunks: []
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if (state.businessContext) {
+        document.getElementById('businessContextInput').value = state.businessContext;
+      }
+
+      const modelSelect = document.getElementById('modelSelector');
+      modelSelect.addEventListener('change', (e) => {
+        state.model = e.target.value;
+      });
+
+      // Health Check usando rota dinâmica
+      fetch(getApiUrl('/api/v1/health'))
+        .then(r => r.json())
+        .then(data => {
+          const rStatus = data.router ? data.router.status : 'online';
+          document.getElementById('serviceStatusText').innerText = `9Router (${rStatus})`;
+        })
+        .catch(() => {
+          document.getElementById('serviceStatusText').innerText = '9Router Local';
+        });
+
+      initWebSpeech();
+      setupClipboardPasteListener();
+    });
+
+    function toggleContextBox() {
+      const box = document.getElementById('contextBoxContent');
+      const icon = document.getElementById('contextToggleIcon');
+      if (box.classList.contains('hidden')) {
+        box.classList.remove('hidden');
+        icon.innerText = '▲ Ocultar';
+      } else {
+        box.classList.add('hidden');
+        icon.innerText = '▼ Expandir';
+      }
+    }
+
+    function saveContextLocal() {
+      const val = document.getElementById('businessContextInput').value;
+      state.businessContext = val;
+      localStorage.setItem('DECISION_BUSINESS_CONTEXT', val);
+      alert('Contexto do negócio salvo localmente!');
+    }
+
+    // ====== SUPORTE A COLAR PRINT COM CTRL+V ======
+    function setupClipboardPasteListener() {
+      window.addEventListener('paste', (e) => {
+        const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        for (let item of items) {
+          if (item.type.indexOf('image') !== -1) {
+            const blob = item.getAsFile();
+            loadAndPreviewImageFile(blob, 'print_clipboard.png');
+            break;
+          }
+        }
+      });
+    }
+
+    function handleFileSelected(e) {
+      const file = e.target.files[0];
+      if (file) {
+        loadAndPreviewImageFile(file, file.name);
+      }
+    }
+
+    function loadAndPreviewImageFile(file, filename) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        state.attachedImageBase64 = event.target.result;
+        document.getElementById('imagePreviewImg').src = state.attachedImageBase64;
+        document.getElementById('imagePreviewName').innerText = filename || 'print.png';
+        document.getElementById('imagePreviewContainer').classList.remove('hidden');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function removeAttachedImage() {
+      state.attachedImageBase64 = null;
+      document.getElementById('imagePreviewContainer').classList.add('hidden');
+      document.getElementById('fileInput').value = '';
+    }
+
+    // ====== CAPTURA DE VOZ NATIVA EM HTTPS ======
+    function initWebSpeech() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        try {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = false;
+          recognition.interimResults = false;
+          recognition.lang = 'pt-BR';
+
+          recognition.onstart = () => {
+            setVoiceUIActive(true, 'Ouvindo sua voz... Fale agora');
+          };
+
+          recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            const input = document.getElementById('promptInput');
+            input.value = (input.value ? input.value + ' ' : '') + transcript;
+          };
+
+          recognition.onend = () => {
+            setVoiceUIActive(false, 'Microfone pronto');
+          };
+
+          recognition.onerror = () => {
+            setVoiceUIActive(false, 'Tentando fallback direto...');
+          };
+
+          state.speechRecognition = recognition;
+        } catch (e) {
+          console.warn('SpeechRecognition falhou ao iniciar:', e);
+        }
+      }
+    }
+
+    function setVoiceUIActive(active, statusText) {
+      state.isRecordingVoice = active;
+      const voiceBtn = document.getElementById('voiceBtn');
+      const pulse = document.getElementById('voicePulseIndicator');
+      const label = document.getElementById('voiceStatusLabel');
+      const promptInput = document.getElementById('promptInput');
+
+      if (active) {
+        voiceBtn.classList.add('mic-recording');
+        pulse.classList.remove('hidden');
+        label.innerText = statusText || 'Gravando... Clique para parar';
+        promptInput.setAttribute('placeholder', 'Ouvindo sua voz... Fale agora.');
+      } else {
+        voiceBtn.classList.remove('mic-recording');
+        pulse.classList.add('hidden');
+        label.innerText = statusText || 'Microfone pronto (PT-BR)';
+        promptInput.setAttribute('placeholder', 'Digite, cole um print com Ctrl+V ou use a voz...');
+      }
+    }
+
+    async function toggleAudioRecording() {
+      if (state.isRecordingVoice) {
+        if (state.speechRecognition) {
+          try { state.speechRecognition.stop(); } catch(e){}
+        }
+        if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+          state.mediaRecorder.stop();
+        }
+        return;
+      }
+
+      if (state.speechRecognition) {
+        try {
+          state.speechRecognition.start();
+          return;
+        } catch (e) {
+          console.log('Fallback para MediaRecorder...', e);
+        }
+      }
+
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          state.audioChunks = [];
+          const recorder = new MediaRecorder(stream);
+
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) state.audioChunks.push(e.data);
+          };
+
+          recorder.onstop = async () => {
+            setVoiceUIActive(false, 'Transcrevendo áudio via 9Router Whisper...');
+            stream.getTracks().forEach(t => t.stop());
+            const blob = new Blob(state.audioChunks, { type: 'audio/webm' });
+            await sendAudioForTranscription(blob);
+          };
+
+          state.mediaRecorder = recorder;
+          recorder.start();
+          setVoiceUIActive(true, 'Gravando áudio...');
+        } catch (err) {
+          console.warn('Erro microfone:', err);
+          document.getElementById('promptInput').value = "Cruze os dados do negócio e identifique os 3 gargalos de maior impacto econômico.";
+        }
+      }
+    }
+
+    async function sendAudioForTranscription(blob) {
+      try {
+        const formData = new FormData();
+        formData.append('file', blob, 'gravacao.webm');
+        const res = await fetch(getApiUrl('/api/v1/decision/transcribe'), { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.text) {
+          document.getElementById('promptInput').value = data.text;
+          handleChatSubmit(null);
+        }
+      } catch (e) {
+        console.error('Erro na transcrição:', e);
+      }
+    }
+
+    // ====== TEMPLATES EM PORTUGUÊS ======
+    function applyTemplate(index) {
+      const templates = [
+        "Cruze os dados do negócio e identifique os 3 gargalos ou oportunidades ocultas, priorizados pelo impacto econômico direto. Para cada achado detalhe: o que detectou, os dados que comprovam, o risco financeiro e o que investigar antes de agir.",
+        "Elabore um plano de ação de 30 dias dividido em 3 fases claras com metas objetivas, responsáveis e KPIs mensuráveis. Monte como um recurso visual dinâmico na Área de Trabalho.",
+        "Identifique clientes e contas críticas que deixaram de ter atividade recente. Construa na Área de Trabalho um recurso visual de retenção contendo: nível de prioridade, tempo de inatividade, valor histórico e estratégia de recuperação imediata.",
+        "Analise o capítulo atual do Leitor Inteligente. Extraia os conceitos essenciais, aponte os pontos críticos de fricção do usuário e crie um checklist prático com passos de aplicação imediata para o negócio.",
+        "Analise o print visual da tela que anexei. Identifique os elementos principais, onde devo clicar para executar a ação e me guie passo a passo, dando um único passo por vez."
+      ];
+      document.getElementById('promptInput').value = templates[index];
+      document.getElementById('promptInput').focus();
+    }
+
+    // ====== ENVIO DO CHAT COM IMAGEM & 9ROUTER ======
+    async function handleChatSubmit(e) {
+      if (e) e.preventDefault();
+      const promptInput = document.getElementById('promptInput');
+      const prompt = promptInput.value.trim();
+      const hasImage = Boolean(state.attachedImageBase64);
+
+      if (!prompt && !hasImage) return;
+
+      if (prompt.startsWith('/investigar ')) {
+        handleInvestigar(prompt.slice('/investigar '.length).trim());
+        promptInput.value = '';
+        return;
+      }
+
+      appendUserMessage(prompt || "Analise o print anexado da interface.", state.attachedImageBase64);
+      promptInput.value = '';
+
+      const submitBtn = document.getElementById('submitBtn');
+      submitBtn.disabled = true;
+      const loadingBubble = appendLoadingBubble(hasImage);
+
+      const imageToSend = state.attachedImageBase64;
+      removeAttachedImage();
+
+      try {
+        const payload = {
+          prompt: prompt,
+          image: imageToSend,
+          context: {
+            business_notes: document.getElementById('businessContextInput').value,
+            topic: "Centro de Decisões / Visão Multimodal 9Router"
+          },
+          history: state.history,
+          model: state.model,
+          sala: (typeof ROOM !== 'undefined' && ROOM) ? ROOM.id : null,
+          client_id: (typeof ROOM !== 'undefined' && ROOM) ? ROOM.clientId : null
+        };
+
+        const res = await fetch(getApiUrl('/api/v1/decision/chat'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        // Validação se a resposta é JSON e não página 404 HTML
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          const rawText = await res.text();
+          throw new Error(`Servidor respondeu com formato inválido (${res.status}): ${rawText.slice(0, 100)}...`);
+        }
+
+        const data = await res.json();
+        loadingBubble.remove();
+
+        appendAgentMessage(data.reply || "Análise executada com sucesso.");
+
+        if (data.tool_call) {
+          handleToolCall(data.tool_call);
+        }
+
+        state.history.push({ role: 'user', content: prompt });
+        state.history.push({ role: 'assistant', content: data.reply });
+
+      } catch (err) {
+        loadingBubble.remove();
+        appendAgentMessage("Erro ao processar: " + err.message);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+
+    // UI CHAT
+    function appendUserMessage(text, imageBase64) {
+      const container = document.getElementById('chatHistory');
+      const div = document.createElement('div');
+      div.className = 'flex justify-end';
+      
+      let imgHtml = '';
+      if (imageBase64) {
+        imgHtml = `<div class="mb-2"><img src="${imageBase64}" class="max-h-40 rounded-lg border border-emerald-500/80 shadow-md"></div>`;
+      }
+
+      div.innerHTML = `
+        <div class="bg-emerald-950/60 border border-emerald-800/80 text-emerald-200 rounded-2xl rounded-tr-sm p-3 max-w-[85%] text-xs shadow-sm">
+          ${imgHtml}
+          ${escapeHtml(text)}
+        </div>
+      `;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function appendAgentMessage(text) {
+      const container = document.getElementById('chatHistory');
+      const div = document.createElement('div');
+      div.className = 'flex items-start space-x-2.5';
+      div.innerHTML = `
+        <div class="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-xs font-bold text-white shrink-0 shadow">
+          IA
+        </div>
+        <div class="bg-canvasPanel border border-canvasBorder rounded-2xl rounded-tl-sm p-3.5 max-w-[90%] text-gray-200 text-xs leading-relaxed shadow-sm">
+          ${formatMarkdownSimple(text)}
+        </div>
+      `;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function appendLoadingBubble(hasImage) {
+      const container = document.getElementById('chatHistory');
+      const div = document.createElement('div');
+      div.className = 'flex items-start space-x-2.5';
+      const msg = hasImage 
+        ? "Processando visão multimodal no 9Router e inspecionando interface..." 
+        : "Consultando 9Router (Gemini 2.5) e formulando decisão executiva...";
+      div.innerHTML = `
+        <div class="w-7 h-7 rounded-full bg-canvasCard border border-canvasBorder flex items-center justify-center text-xs text-emerald-400 shrink-0">
+          <svg class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+        </div>
+        <div class="bg-canvasPanel border border-canvasBorder rounded-xl p-3 text-gray-400 text-xs italic">
+          ${msg}
+        </div>
+      `;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+      return div;
+    }
+
+    // ====== RENDERIZADORES NO CANVAS ======
+    function handleToolCall(toolCall) {
+      state.generatedResources.push(toolCall);
+      state.activeResourceIndex = state.generatedResources.length - 1;
+      updateResourceHistoryDropdown();
+      renderResource(toolCall);
+    }
+
+    function renderResource(toolCall) {
+      const voidState = document.getElementById('voidState');
+      const container = document.getElementById('renderedResourceContainer');
+      const badge = document.getElementById('resourceBadge');
+
+      voidState.classList.add('hidden');
+      container.classList.remove('hidden');
+      badge.classList.remove('hidden');
+
+      const labels = {
+        'render_action_plan': 'Plano de Ação',
+        'render_decision_matrix': 'Matriz de Auditoria',
+        'render_study_breakdown': 'Síntese de Leitura'
+      };
+      badge.innerText = labels[toolCall.type] || toolCall.type;
+
+      if (toolCall.type === 'render_action_plan') {
+        renderActionPlan(container, toolCall.data);
+      } else if (toolCall.type === 'render_decision_matrix') {
+        renderDecisionMatrix(container, toolCall.data);
+      } else if (toolCall.type === 'render_study_breakdown') {
+        renderStudyBreakdown(container, toolCall.data);
+      }
+    }
+
+    function renderActionPlan(container, data) {
+      const kpisHtml = (data.kpis || []).map(k => `
+        <div class="bg-canvasCard border border-canvasBorder p-3 rounded-xl flex flex-col justify-between">
+          <span class="text-[11px] text-gray-400 font-medium">${escapeHtml(k.name || k.nome || '')}</span>
+          <div class="flex items-baseline justify-between mt-1.5">
+            <span class="text-base font-bold text-emerald-400 font-mono">${escapeHtml(k.target || k.meta || '')}</span>
+            <span class="text-[10px] text-gray-500 font-mono">Atual: ${escapeHtml(k.current || k.atual || '-')}</span>
+          </div>
+        </div>
+      `).join('');
+
+      const phasesHtml = (data.phases || []).map((ph, phIdx) => {
+        const tasksHtml = (ph.tasks || []).map((t, tIdx) => {
+          const isDone = t.status === 'completed';
+          // Normaliza: a IA pode devolver a tarefa com chaves em PT
+          // (titulo/responsavel/prazo), como string solta, ou sem owner/
+          // deadline — sem isso o canvas renderizava linhas vazias.
+          const _t = (typeof t === 'string') ? { task: t } : (t || {});
+          const _title = _t.task || _t.titulo || _t.title || _t.nome || _t.descricao || _t.description || '';
+          const _owner = _t.owner || _t.responsavel || _t.responsible || '';
+          const _deadline = _t.deadline || _t.prazo || _t.due || '';
+          return `
+            <div class="flex items-start justify-between p-2.5 rounded-lg bg-canvasDark/60 border border-canvasBorder hover:border-gray-600 transition text-xs">
+              <label class="flex items-start space-x-2.5 cursor-pointer flex-1">
+                <input type="checkbox" ${isDone ? 'checked' : ''} onchange="toggleTaskDone(${phIdx}, ${tIdx}, this.checked)" class="mt-0.5 rounded border-canvasBorder text-emerald-600 focus:ring-0 bg-canvasDark cursor-pointer">
+                <span class="${isDone ? 'line-through text-gray-500' : 'text-gray-200'} font-medium">
+                  ${escapeHtml(_title || 'Tarefa sem descrição')}
+                </span>
+              </label>
+              <div class="flex items-center space-x-2 shrink-0 ml-3 font-mono text-[10px]">
+                <span class="px-2 py-0.5 rounded bg-canvasCard text-gray-400">${escapeHtml(_owner || 'Resp.')}</span>
+                <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-900">${escapeHtml(_deadline || 'D+0')}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="bg-canvasPanel border border-canvasBorder rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between border-b border-canvasBorder/60 pb-2">
+              <div>
+                <h4 class="text-xs font-bold text-gray-100 flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  ${escapeHtml(ph.phase || ph.fase || ph.nome || ph.title || 'Fase')}
+                </h4>
+                <p class="text-[11px] text-gray-400 mt-0.5">${escapeHtml(ph.goal || ph.objetivo || '')}</p>
+              </div>
+              <span class="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-900/60">
+                ${(ph.tasks || []).length} Tarefas
+              </span>
+            </div>
+            <div class="space-y-2">
+              ${tasksHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.innerHTML = `
+        <div class="space-y-4">
+          <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-5 shadow-lg">
+            <div class="flex items-start justify-between">
+              <div>
+                <span class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60">
+                  Execução Estratégica
+                </span>
+                <h3 class="text-base font-bold text-gray-100 mt-2">${escapeHtml(data.title)}</h3>
+                <p class="text-xs text-gray-400 mt-1">${escapeHtml(data.objective)}</p>
+              </div>
+              <button onclick="window.print()" class="text-xs text-gray-400 hover:text-gray-200 border border-canvasBorder p-1.5 rounded-lg">
+                🖨️ Imprimir
+              </button>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              ${kpisHtml}
+            </div>
+
+            ${data.executive_summary ? `
+              <div class="mt-4 p-3 rounded-xl bg-canvasDark border border-canvasBorder text-xs text-gray-300">
+                <span class="font-semibold text-emerald-400">Sumário Executivo:</span> ${escapeHtml(data.executive_summary)}
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="space-y-3 pb-8">
+            ${phasesHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDecisionMatrix(container, data) {
+      const findingsHtml = (data.findings || []).map(f => {
+        const isUrgent = f.status === 'urgente';
+        const badgeColor = isUrgent 
+          ? 'bg-red-950/80 text-red-400 border-red-800/60' 
+          : (f.status === 'alerta' ? 'bg-amber-950/80 text-amber-400 border-amber-800/60' : 'bg-emerald-950/80 text-emerald-400 border-emerald-800/60');
+
+        return `
+          <div class="bg-canvasPanel border border-canvasBorder rounded-xl p-4.5 space-y-3 hover:border-gray-500 transition shadow-sm">
+            <div class="flex items-start justify-between">
+              <div class="flex items-center space-x-2">
+                <span class="w-6 h-6 rounded-lg bg-canvasCard border border-canvasBorder flex items-center justify-center font-mono font-bold text-xs text-gray-200">
+                  #${f.rank}
+                </span>
+                <h4 class="text-sm font-bold text-gray-100">${escapeHtml(f.title)}</h4>
+              </div>
+              <span class="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded border ${badgeColor}">
+                ${escapeHtml(f.status || 'análise')}
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              <div class="p-2.5 rounded-lg bg-canvasDark border border-canvasBorder">
+                <span class="text-[10px] font-mono text-gray-500 uppercase">Impacto Financeiro Calculado</span>
+                <div class="font-bold text-red-400 mt-0.5 font-mono text-xs">${escapeHtml(f.economic_impact)}</div>
+              </div>
+              <div class="p-2.5 rounded-lg bg-canvasDark border border-canvasBorder">
+                <span class="text-[10px] font-mono text-gray-500 uppercase">Evidência / Dado Detectado</span>
+                <div class="text-gray-300 mt-0.5 text-xs">${escapeHtml(f.evidence)}</div>
+              </div>
+            </div>
+
+            <div class="text-xs space-y-1.5 text-gray-300 pt-1 border-t border-canvasBorder/60">
+              <p><span class="font-semibold text-gray-400">Por que se preocupar:</span> ${escapeHtml(f.why_care)}</p>
+              <p><span class="font-semibold text-gray-400">Investigar antes de decidir:</span> ${escapeHtml(f.pre_decision_check)}</p>
+            </div>
+
+            <div class="p-3 rounded-lg bg-emerald-950/40 border border-emerald-900/60 flex items-center justify-between text-xs">
+              <div>
+                <span class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold block">Ação Executiva Recomendada</span>
+                <span class="text-gray-200">${escapeHtml(f.recommended_action)}</span>
+              </div>
+              <button onclick="triggerImmediateAction('${escapeHtml(f.title)}')" class="shrink-0 ml-3 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-semibold text-xs transition">
+                Executar Agora
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.innerHTML = `
+        <div class="space-y-4 pb-8">
+          <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-5 shadow-lg">
+            <span class="text-[10px] font-mono uppercase tracking-wider text-red-400 bg-red-950/80 px-2 py-0.5 rounded border border-red-800/60">
+              Auditoria de Gargalos & Oportunidades
+            </span>
+            <h3 class="text-base font-bold text-gray-100 mt-2">${escapeHtml(data.title)}</h3>
+
+            <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="p-3.5 rounded-xl bg-red-950/30 border border-red-900/50 flex items-center justify-between">
+                <div>
+                  <span class="text-[10px] font-mono text-gray-400 uppercase">Exposição Total de Risco</span>
+                  <div class="text-xl font-bold font-mono text-red-400 mt-0.5">${escapeHtml(data.total_risk_exposure || 'R$ 0')}</div>
+                </div>
+                <div class="text-2xl">⚠️</div>
+              </div>
+
+              <div class="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-900/50 flex items-center justify-between">
+                <div>
+                  <span class="text-[10px] font-mono text-gray-400 uppercase">Oportunidade Imediata</span>
+                  <div class="text-xl font-bold font-mono text-emerald-400 mt-0.5">${escapeHtml(data.immediate_opportunity || 'R$ 0')}</div>
+                </div>
+                <div class="text-2xl">⚡</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            ${findingsHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderStudyBreakdown(container, data) {
+      const insightsHtml = (data.core_insights || []).map(ci => `
+        <div class="p-3 rounded-xl bg-canvasCard border border-canvasBorder space-y-1">
+          <div class="text-xs font-bold text-emerald-400">${escapeHtml(ci.concept)}</div>
+          <p class="text-xs text-gray-300 leading-relaxed">${escapeHtml(ci.takeaway)}</p>
+        </div>
+      `).join('');
+
+      const frictionHtml = (data.critical_friction_points || []).map(f => `
+        <li class="flex items-start space-x-2 text-xs text-amber-200/90">
+          <span class="text-amber-400 mt-0.5">⚠️</span>
+          <span>${escapeHtml(f)}</span>
+        </li>
+      `).join('');
+
+      const checklistHtml = (data.actionable_checklist || []).map((c, idx) => `
+        <label class="flex items-center space-x-2.5 p-2 rounded-lg bg-canvasDark border border-canvasBorder text-xs text-gray-200 cursor-pointer hover:border-gray-600 transition">
+          <input type="checkbox" ${c.done ? 'checked' : ''} onchange="toggleChecklistItem(${idx}, this.checked)" class="rounded border-canvasBorder text-emerald-600 focus:ring-0 bg-canvasDark cursor-pointer">
+          <span class="${c.done ? 'line-through text-gray-500' : ''}">${escapeHtml(c.step)}</span>
+        </label>
+      `).join('');
+
+      const questionsHtml = (data.reflection_questions || []).map(q => `
+        <li class="text-xs text-gray-300 italic pl-3 border-l-2 border-emerald-500/80">
+          "${escapeHtml(q)}"
+        </li>
+      `).join('');
+
+      container.innerHTML = `
+        <div class="space-y-4 pb-8">
+          <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-5 shadow-lg">
+            <span class="text-[10px] font-mono uppercase tracking-wider text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800/60">
+              Leitor Inteligente • PWA Ebook
+            </span>
+            <h3 class="text-base font-bold text-gray-100 mt-2">${escapeHtml(data.title)}</h3>
+            <p class="text-xs text-gray-400 font-mono mt-1">Tópico: ${escapeHtml(data.chapter_or_topic)}</p>
+          </div>
+
+          <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-4.5 space-y-2.5">
+            <h4 class="text-xs font-bold text-gray-200 uppercase tracking-wider">Conceitos Essenciais da Leitura</h4>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              ${insightsHtml}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-4.5 space-y-3">
+              <h4 class="text-xs font-bold text-amber-400 uppercase tracking-wider">Pontos Críticos de Fricção</h4>
+              <ul class="space-y-2">
+                ${frictionHtml}
+              </ul>
+            </div>
+
+            <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-4.5 space-y-3">
+              <h4 class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Checklist Prático Operacional</h4>
+              <div class="space-y-2">
+                ${checklistHtml}
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-4.5 space-y-2.5">
+            <h4 class="text-xs font-bold text-gray-300 uppercase tracking-wider">Perguntas de Alavancagem Imediata</h4>
+            <ul class="space-y-2">
+              ${questionsHtml}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
+
+    function toggleTaskDone(phaseIdx, taskIdx, checked) {
+      if (state.activeResourceIndex >= 0) {
+        const res = state.generatedResources[state.activeResourceIndex];
+        if (res && res.data && res.data.phases) {
+          res.data.phases[phaseIdx].tasks[taskIdx].status = checked ? 'completed' : 'pending';
+        }
+      }
+    }
+
+    function toggleChecklistItem(idx, checked) {
+      if (state.activeResourceIndex >= 0) {
+        const res = state.generatedResources[state.activeResourceIndex];
+        if (res && res.data && res.data.actionable_checklist) {
+          res.data.actionable_checklist[idx].done = checked;
+        }
+      }
+    }
+
+    function triggerImmediateAction(title) {
+      appendUserMessage(`Disparando execução imediata: "${title}"`);
+      handleChatSubmit(null);
+    }
+
+    function resetCanvasToVoid() {
+      document.getElementById('voidState').classList.remove('hidden');
+      document.getElementById('renderedResourceContainer').classList.add('hidden');
+      document.getElementById('resourceBadge').classList.add('hidden');
+    }
+
+    function exportCurrentResource() {
+      if (state.activeResourceIndex < 0 || !state.generatedResources[state.activeResourceIndex]) {
+        alert('Nenhum recurso gerado no Canvas no momento para exportar.');
+        return;
+      }
+      const res = state.generatedResources[state.activeResourceIndex];
+      const blob = new Blob([JSON.stringify(res, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `decisao-canvas-${res.type}-${Date.now()}.json`;
+      a.click();
+    }
+
+    function updateResourceHistoryDropdown() {
+      const select = document.getElementById('resourceHistorySelect');
+      const container = document.getElementById('resourceHistoryContainer');
+      container.classList.remove('hidden');
+      select.innerHTML = '';
+      state.generatedResources.forEach((res, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.innerText = `#${i + 1} - ${res.type.replace('render_', '')}`;
+        if (i === state.activeResourceIndex) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+
+    function switchResource(index) {
+      const idx = parseInt(index);
+      if (state.generatedResources[idx]) {
+        state.activeResourceIndex = idx;
+        renderResource(state.generatedResources[idx]);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatMarkdownSimple(text) {
+      if (!text) return '';
+      let escaped = escapeHtml(text);
+      escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>');
+      escaped = escaped.replace(/\n/g, '<br/>');
+      return escaped;
+    }
+  </script>
+
+  <!-- MODAL ONBOARDING (primeiro acesso) -->
+  <div id="onboardingModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+      <h3 class="font-bold text-gray-100">Complete seu cadastro</h3>
+      <p class="text-xs text-gray-400 mt-1">Só pedimos isso uma vez, no primeiro acesso.</p>
+      <label class="block text-xs font-semibold text-gray-300 mt-4 mb-1">Nome completo</label>
+      <input id="onbName" class="w-full bg-canvasDark border border-canvasBorder rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-emerald-500">
+      <label class="block text-xs font-semibold text-gray-300 mt-3 mb-1">Telefone / WhatsApp</label>
+      <input id="onbPhone" placeholder="(00) 90000-0000" class="w-full bg-canvasDark border border-canvasBorder rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-emerald-500">
+      <p id="onbError" class="hidden text-xs text-red-400 mt-2"></p>
+      <div class="flex gap-2 mt-5">
+        <button onclick="saveOnboarding()" class="flex-1 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black text-sm font-bold transition">Salvar dados</button>
+        <button onclick="closeOnboarding()" class="px-3 py-2 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-300 text-sm transition">Agora não</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CARD DE SALA CRIADA -->
+  <div id="roomCardModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div class="bg-canvasPanel border border-canvasBorder rounded-2xl p-6 w-full max-w-md shadow-2xl">
+      <h3 class="font-bold text-gray-100">✅ Sala criada!</h3>
+      <label class="block text-xs font-semibold text-gray-300 mt-4 mb-1">Link da reunião</label>
+      <input id="roomCardLink" readonly class="w-full bg-canvasDark border border-canvasBorder rounded-lg px-3 py-2 text-sm font-mono text-cyan-300 focus:outline-none">
+      <div class="flex flex-wrap gap-2 mt-5">
+        <button onclick="copyRoomCardLink()" class="px-3 py-2 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-200 text-sm transition">Copiar Link</button>
+        <a id="roomCardWhats" target="_blank" rel="noopener" class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black text-sm font-bold transition">Compartilhar no WhatsApp</a>
+        <a id="roomCardEnter" target="_blank" rel="noopener" class="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-black text-sm font-bold transition">Entrar na Sala Agora</a>
+        <button onclick="closeRoomCard()" class="px-3 py-2 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-300 text-sm transition">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+  <script>
+    // ================= SALA MULTI-USUARIO (link + WebSocket) =================
+    const ROOM = (() => {
+      const params = new URLSearchParams(window.location.search);
+      let id = params.get('sala');
+      if (!id) {
+        id = Math.random().toString(36).slice(2, 12);
+        const url = new URL(window.location.href);
+        url.searchParams.set('sala', id);
+        window.history.replaceState({}, '', url.toString());
+      }
+      let clientId = sessionStorage.getItem('decision_client_id');
+      if (!clientId) {
+        clientId = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+        sessionStorage.setItem('decision_client_id', clientId);
+      }
+      return { id, clientId };
+    })();
+
+    document.getElementById('roomLinkInput').value =
+      window.location.origin + window.location.pathname.replace(/\/$/, '') + '/?sala=' + ROOM.id;
+
+    function copyRoomLink() {
+      const input = document.getElementById('roomLinkInput');
+      const done = () => {
+        const fb = document.getElementById('roomCopyFeedback');
+        fb.classList.remove('hidden');
+        setTimeout(() => fb.classList.add('hidden'), 2000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).then(done).catch(() => { input.select(); document.execCommand('copy'); done(); });
+      } else {
+        input.select();
+        document.execCommand('copy');
+        done();
+      }
+    }
+
+    let wsSocket = null;
+    let wsRetryMs = 1000;
+    let snapshotApplied = false;
+
+    function setWsStatus(kind, text) {
+      const dot = document.getElementById('wsStatusDot');
+      const label = document.getElementById('wsStatusText');
+      dot.className = 'w-2 h-2 rounded-full ' + (kind === 'ok' ? 'bg-emerald-400' : kind === 'bad' ? 'bg-red-400' : 'bg-amber-400');
+      label.innerText = text;
+    }
+
+    function connectRoomWS() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = proto + '//' + window.location.host + API_BASE + '/ws/sala/' + encodeURIComponent(ROOM.id) + '?client=' + encodeURIComponent(ROOM.clientId);
+      setWsStatus('wait', 'Conectando...');
+      try {
+        wsSocket = new WebSocket(url);
+      } catch (err) {
+        setWsStatus('bad', 'WS indisponível');
+        return;
+      }
+      wsSocket.onopen = () => { setWsStatus('ok', 'Sala sincronizada'); wsRetryMs = 1000; };
+      wsSocket.onmessage = (ev) => {
+        try { handleRoomMessage(JSON.parse(ev.data)); } catch (e) { /* ignora */ }
+      };
+      wsSocket.onclose = () => {
+        setWsStatus('bad', 'Reconectando...');
+        setTimeout(connectRoomWS, wsRetryMs);
+        wsRetryMs = Math.min(wsRetryMs * 2, 15000);
+      };
+      wsSocket.onerror = () => { setWsStatus('bad', 'Erro na sala'); };
+    }
+
+    function handleRoomMessage(msg) {
+      if (!msg || !msg.type) return;
+      if (msg.type === 'presence') {
+        document.getElementById('presenceBadge').innerText = '● ' + msg.count + ' online';
+      } else if (msg.type === 'chat') {
+        if (msg.role === 'user') appendUserMessage(msg.text);
+        else appendAgentMessage(msg.text);
+      } else if (msg.type === 'canvas' && msg.tool_call) {
+        handleToolCall(msg.tool_call);
+      } else if (msg.type === 'calc' && msg.calc) {
+        renderCalcOutput(msg.calc);
+      } else if (msg.type === 'monaco_update') {
+        showTypingBadge(msg.sender || 'Participante');
+        applyMonacoRemote(msg.lang || 'python', msg.code || '');
+      } else if (msg.type === 'monaco_lang') {
+        setMonacoLang(msg.lang || 'python', { broadcast: false });
+      } else if (msg.type === 'snapshot' && !snapshotApplied) {
+        snapshotApplied = true;
+        if (msg.canvas) handleToolCall(msg.canvas);
+        if (msg.calc) renderCalcOutput(msg.calc);
+        if (msg.monaco) {
+          if (msg.monaco.buffers) Object.assign(monacoTexts, msg.monaco.buffers);
+          if (msg.monaco.lang) setMonacoLang(msg.monaco.lang, { broadcast: false, save: false });
+          else codeSet(monacoTexts[monacoLang]);
+        }
+      }
+    }
+
+    // ================= NOVOS TIPOS DE CANVAS (investigacao / calculo) =================
+    const _origRenderResource = renderResource;
+    renderResource = function (toolCall) {
+      if (toolCall.type === 'render_investigation') return renderInvestigation(toolCall.data || {});
+      if (toolCall.type === 'render_calc_result') return renderCalcResult(toolCall.data || {});
+      return _origRenderResource(toolCall);
+    };
+
+    function showCanvasCard(badgeText, innerHtml) {
+      document.getElementById('voidState').classList.add('hidden');
+      const container = document.getElementById('renderedResourceContainer');
+      container.classList.remove('hidden');
+      container.classList.add('flex');
+      const badge = document.getElementById('resourceBadge');
+      badge.classList.remove('hidden');
+      badge.innerText = badgeText;
+      container.innerHTML = innerHtml;
+      container.scrollTop = 0;
+    }
+
+    function renderInvestigation(data) {
+      const shot = data.screenshot_url
+        ? '<a href="' + getApiUrl(data.screenshot_url) + '" target="_blank" rel="noopener"><img src="' + getApiUrl(data.screenshot_url) + '" class="w-full rounded-lg border border-canvasBorder shadow-md mt-3" alt="Print capturado do site investigado"></a><p class="text-[11px] text-gray-500 mt-1">Print capturado — clique para abrir em tamanho real.</p>'
+        : '<p class="text-[11px] text-gray-500 mt-2">Sem print: passe uma URL (não só um tema) para capturar a tela do site.</p>';
+      showCanvasCard('Investigação', ''
+        + '<div class="bg-canvasPanel border border-canvasBorder rounded-xl p-5 shadow-sm">'
+        + '<h3 class="text-base font-bold text-gray-100 flex items-center gap-2">🔍 Investigação: ' + escapeHtml(data.query || '') + '</h3>'
+        + '<div class="mt-3 text-xs text-gray-200 leading-relaxed">' + formatMarkdownSimple(data.dossier || '') + '</div>'
+        + shot
+        + '</div>');
+    }
+
+    function renderCalcResult(data) {
+      showCanvasCard('Cálculo', ''
+        + '<div class="bg-canvasPanel border border-canvasBorder rounded-xl p-5 shadow-sm">'
+        + '<h3 class="text-base font-bold text-gray-100">📊 Resultado do cálculo (' + escapeHtml(data.language || '') + ')</h3>'
+        + '<pre class="mt-3 bg-canvasDark border border-canvasBorder rounded-lg p-3 text-xs font-mono text-emerald-200 whitespace-pre-wrap">' + escapeHtml(data.output || '') + '</pre>'
+        + '<p class="text-[11px] text-gray-500 mt-2">' + (data.ms ? 'Executado em ' + data.ms + 'ms no Piston.' : '') + ' Os números acima foram calculados de verdade, não estimados pela IA.</p>'
+        + '</div>');
+    }
+
+    // ================= MONACO + PISTON =================
+    const MONACO_TEMPLATES = {
+      python: '# Calculadora de Métricas Comerciais — edite os números e aperte ▶ Calcular Métricas\n'
+        + 'faturamento = 120000.0\n'
+        + 'custos_variaveis = 48000.0\n'
+        + 'custos_fixos = 25000.0\n'
+        + 'clientes_novos = 320\n'
+        + 'investimento_marketing = 9600.0\n'
+        + 'ticket_medio = 375.0\n'
+        + 'clientes_ativos = 1200\n'
+        + 'clientes_perdidos = 96\n'
+        + '\n'
+        + 'margem_bruta = faturamento - custos_variaveis\n'
+        + 'margem_pct = margem_bruta / faturamento * 100\n'
+        + 'lucro = margem_bruta - custos_fixos\n'
+        + 'cac = investimento_marketing / clientes_novos\n'
+        + 'ltv = ticket_medio * 6\n'
+        + 'ltv_cac = ltv / cac\n'
+        + 'churn_pct = clientes_perdidos / clientes_ativos * 100\n'
+        + 'projecao_3m = faturamento * 1.15\n'
+        + '\n'
+        + 'print(f"Margem bruta: R$ {margem_bruta:,.2f} ({margem_pct:.1f}%)")\n'
+        + 'print(f"Lucro: R$ {lucro:,.2f}")\n'
+        + 'print(f"CAC: R$ {cac:.2f} | LTV: R$ {ltv:.2f} | LTV/CAC: {ltv_cac:.2f}")\n'
+        + 'print(f"Churn: {churn_pct:.1f}%")\n'
+        + 'print(f"Projeção 3 meses (+15%): R$ {projecao_3m:,.2f}")\n',
+      javascript: '// Calculadora de Métricas Comerciais — edite os números e aperte ▶ Calcular Métricas\n'
+        + 'const faturamento = 120000, custos_variaveis = 48000, custos_fixos = 25000;\n'
+        + 'const clientes_novos = 320, investimento_marketing = 9600, ticket_medio = 375;\n'
+        + 'const clientes_ativos = 1200, clientes_perdidos = 96;\n'
+        + 'const margem_bruta = faturamento - custos_variaveis;\n'
+        + 'const margem_pct = margem_bruta / faturamento * 100;\n'
+        + 'const lucro = margem_bruta - custos_fixos;\n'
+        + 'const cac = investimento_marketing / clientes_novos;\n'
+        + 'const ltv = ticket_medio * 6, ltv_cac = ltv / cac;\n'
+        + 'const churn_pct = clientes_perdidos / clientes_ativos * 100;\n'
+        + 'console.log(`Margem bruta: R$ ${margem_bruta.toFixed(2)} (${margem_pct.toFixed(1)}%)`);\n'
+        + 'console.log(`Lucro: R$ ${lucro.toFixed(2)}`);\n'
+        + 'console.log(`CAC: R$ ${cac.toFixed(2)} | LTV: R$ ${ltv.toFixed(2)} | LTV/CAC: ${ltv_cac.toFixed(2)}`);\n'
+        + 'console.log(`Churn: ${churn_pct.toFixed(1)}%`);\n'
+        + 'console.log(`Projeção 3 meses (+15%): R$ ${(faturamento * 1.15).toFixed(2)}`);\n',
+      php: '<?php // Calculadora de Métricas Comerciais — edite os números e aperte ▶ Calcular Métricas\n'
+        + '$faturamento = 120000; $custos_variaveis = 48000; $custos_fixos = 25000;\n'
+        + '$clientes_novos = 320; $investimento_marketing = 9600; $ticket_medio = 375;\n'
+        + '$clientes_ativos = 1200; $clientes_perdidos = 96;\n'
+        + '$margem_bruta = $faturamento - $custos_variaveis;\n'
+        + '$margem_pct = $margem_bruta / $faturamento * 100;\n'
+        + '$lucro = $margem_bruta - $custos_fixos;\n'
+        + '$cac = $investimento_marketing / $clientes_novos;\n'
+        + '$ltv = $ticket_medio * 6; $ltv_cac = $ltv / $cac;\n'
+        + '$churn_pct = $clientes_perdidos / $clientes_ativos * 100;\n'
+        + 'echo "Margem bruta: R$ " . number_format($margem_bruta, 2) . " ($margem_pct%)\n";\n'
+        + 'echo "Lucro: R$ " . number_format($lucro, 2) . "\n";\n'
+        + 'echo "CAC: R$ $cac | LTV: R$ $ltv | LTV/CAC: $ltv_cac\n";\n'
+        + 'echo "Churn: $churn_pct%\n";\n'
+        + 'echo "Projeção 3 meses (+15%): R$ " . number_format($faturamento * 1.15, 2) . "\n";\n',
+      text: 'Anotações da reunião (esta aba não executa — troque para Python, JavaScript ou PHP para calcular).\n\n'
+        + 'Pauta:\n- \n\nNúmeros trazidos para a mesa:\n- \n\nDecisões tomadas:\n- \n'
+    };
+    const MONACO_LANG_MAP = { python: 'python', javascript: 'javascript', php: 'php', text: 'plaintext' };
+    let monacoEditor = null;
+    let monacoLang = 'python';
+    let monacoTexts = { python: MONACO_TEMPLATES.python, javascript: MONACO_TEMPLATES.javascript, php: MONACO_TEMPLATES.php, text: MONACO_TEMPLATES.text };
+    let lastCalc = null;
+
+    // ---- Sync colaborativo do Monaco (texto completo + debounce 100ms) ----
+    let applyingRemote = false;
+    let monacoSendTimer = null;
+    let typingTimer = null;
+
+    function myName() {
+      return (document.getElementById('videoNameInput').value || 'Participante').trim() || 'Participante';
+    }
+
+    function wsSend(obj) {
+      try {
+        if (wsSocket && wsSocket.readyState === WebSocket.OPEN) wsSocket.send(JSON.stringify(obj));
+      } catch (e) {}
+    }
+
+    function scheduleMonacoSend() {
+      clearTimeout(monacoSendTimer);
+      monacoSendTimer = setTimeout(sendMonacoUpdate, 100);
+    }
+
+    function sendMonacoUpdate() {
+      const code = codeGet();
+      if (code.length > 200000) return;
+      wsSend({ type: 'monaco_update', lang: monacoLang, code: code, sender: myName() });
+    }
+
+    function showTypingBadge(sender) {
+      const badge = document.getElementById('monacoTypingBadge');
+      badge.innerText = '✍️ ' + sender + ' está digitando...';
+      badge.classList.remove('hidden');
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => badge.classList.add('hidden'), 2000);
+    }
+
+    function applyMonacoRemote(lang, code) {
+      monacoTexts[lang] = code;
+      if (lang !== monacoLang) return;
+      applyingRemote = true;
+      try {
+        if (monacoEditor) {
+          const sel = monacoEditor.getSelection();
+          monacoEditor.setValue(code);
+          if (sel) { try { monacoEditor.setSelection(sel); } catch (e) {} }
+        } else {
+          const ta = document.getElementById('monacoFallback');
+          const ss = ta.selectionStart, se = ta.selectionEnd;
+          ta.value = code;
+          try { ta.setSelectionRange(Math.min(ss, code.length), Math.min(se, code.length)); } catch (e) {}
+        }
+      } finally {
+        applyingRemote = false;
+      }
+    }
+
+    function paintMonacoTabs() {
+      document.querySelectorAll('.monaco-tab').forEach((btn) => {
+        const active = btn.dataset.lang === monacoLang;
+        btn.className = 'monaco-tab px-2.5 py-1 rounded text-xs border ' + (active ? 'bg-emerald-600 text-black font-bold border-emerald-600' : 'bg-canvasCard text-gray-300 border-canvasBorder');
+      });
+    }
+
+    function codeGet() {
+      if (monacoEditor) return monacoEditor.getValue();
+      return document.getElementById('monacoFallback').value;
+    }
+
+    function codeSet(text) {
+      if (monacoEditor) monacoEditor.setValue(text);
+      else document.getElementById('monacoFallback').value = text;
+    }
+
+    function setMonacoLang(lang, opts) {
+      opts = opts || {};
+      const save = opts.save !== false;
+      const broadcast = opts.broadcast !== false;
+      if (save) monacoTexts[monacoLang] = codeGet();
+      monacoLang = lang;
+      paintMonacoTabs();
+      if (monacoEditor) {
+        monaco.editor.setModelLanguage(monacoEditor.getModel(), MONACO_LANG_MAP[lang]);
+        monacoEditor.setValue(monacoTexts[lang]);
+      } else {
+        document.getElementById('monacoFallback').value = monacoTexts[lang];
+      }
+      if (broadcast) wsSend({ type: 'monaco_lang', lang: lang, sender: myName() });
+    }
+
+    function initMonacoFallback() {
+      if (monacoEditor) return;
+      const fb = document.getElementById('monacoFallback');
+      fb.classList.remove('hidden');
+      fb.value = monacoTexts[monacoLang];
+      fb.addEventListener('input', () => { if (applyingRemote) return; monacoTexts[monacoLang] = fb.value; scheduleMonacoSend(); });
+    }
+
+    function initMonaco() {
+      paintMonacoTabs();
+      if (typeof require === 'undefined') { initMonacoFallback(); return; }
+      try {
+        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
+        require(['vs/editor/editor.main'], () => {
+          monacoEditor = monaco.editor.create(document.getElementById('monacoContainer'), {
+            value: monacoTexts[monacoLang],
+            language: MONACO_LANG_MAP[monacoLang],
+            theme: 'vs-dark',
+            automaticLayout: true,
+            fontSize: 12,
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false
+          });
+          monacoEditor.onDidChangeModelContent(() => { if (applyingRemote) return; monacoTexts[monacoLang] = monacoEditor.getValue(); scheduleMonacoSend(); });
+        });
+      } catch (e) {
+        initMonacoFallback();
+      }
+      setTimeout(() => { if (!monacoEditor) initMonacoFallback(); }, 6000);
+    }
+
+    function renderCalcOutput(calc) {
+      lastCalc = calc;
+      const out = document.getElementById('pistonOutput');
+      let text = calc.stdout || '';
+      if (calc.stderr) text += (text ? '\n' : '') + '[stderr]\n' + calc.stderr;
+      if (!text) text = '(sem saída — o script não imprimiu nada)';
+      out.textContent = text;
+      document.getElementById('calcMeta').innerText = (calc.language || '') + ' • ' + (calc.ms || 0) + 'ms • exit ' + (calc.code === null || calc.code === undefined ? '?' : calc.code);
+    }
+
+    async function runMetricsCalc() {
+      const btn = document.getElementById('calcBtn');
+      if (monacoLang === 'text') {
+        renderCalcOutput({ language: 'texto', stdout: 'A aba Texto é só rascunho — troque para Python, JavaScript ou PHP para calcular.', stderr: '', code: 0, ms: 0 });
+        return;
+      }
+      btn.disabled = true;
+      const oldLabel = btn.innerText;
+      btn.innerText = 'Calculando...';
+      try {
+        const res = await fetch(getApiUrl('/api/v1/decision/calc'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sala: ROOM.id, client_id: ROOM.clientId, language: monacoLang, source: codeGet() })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Falha no Piston');
+        renderCalcOutput(data);
+      } catch (err) {
+        renderCalcOutput({ language: monacoLang, stdout: '', stderr: 'Erro: ' + err.message, code: 1, ms: 0 });
+      } finally {
+        btn.disabled = false;
+        btn.innerText = oldLabel;
+      }
+    }
+
+    async function sendCalcToCanvas() {
+      if (!lastCalc) {
+        document.getElementById('pistonOutput').textContent = 'Calcule algo primeiro (▶ Calcular Métricas) e depois envie ao Canvas.';
+        return;
+      }
+      const toolCall = { type: 'render_calc_result', data: { language: lastCalc.language, output: lastCalc.stdout || lastCalc.output || '', ms: lastCalc.ms } };
+      handleToolCall(toolCall);
+      try {
+        await fetch(getApiUrl('/api/v1/decision/share'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sala: ROOM.id, client_id: ROOM.clientId, tool_call: toolCall })
+        });
+      } catch (e) { /* o canvas local já mostra; a sala pega no próximo snapshot */ }
+    }
+
+    // ================= VÍDEO (Chitchatter / Daily.co) =================
+    let videoMode = 'chitchatter';
+
+    function sanitizeRoomName(raw) {
+      return (raw || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    }
+
+    function videoUserName() {
+      return encodeURIComponent((document.getElementById('videoNameInput').value || 'Participante').trim() || 'Participante');
+    }
+
+    function buildVideoUrl() {
+      const name = videoUserName();
+      return 'https://chitchatter.im/public/sala-decision-' + encodeURIComponent(ROOM.id) + '?username=' + name + '#' + name;
+    }
+
+    function paintVideoButtons() {
+      document.getElementById('videoBtnChitchatter').className = 'px-3 py-1.5 ' + (videoMode === 'chitchatter' ? 'bg-emerald-600 text-black font-semibold' : 'bg-canvasCard text-gray-300');
+      document.getElementById('videoBtnDaily').className = 'px-3 py-1.5 ' + (videoMode === 'daily' ? 'bg-emerald-600 text-black font-semibold' : 'bg-canvasCard text-gray-300');
+    }
+
+    function setVideoStatus(text) {
+      document.getElementById('videoStatusText').innerText = text || '';
+    }
+
+    let dailyUrlCache = null;
+    let dailyProvisioning = false;
+
+    async function setVideoMode(mode) {
+      videoMode = mode;
+      paintVideoButtons();
+      if (mode === 'daily') {
+        if (dailyUrlCache) {
+          document.getElementById('videoFrame').src = dailyUrlCache + '?userName=' + videoUserName();
+          setVideoStatus('Sala Daily pronta.');
+          return;
+        }
+        if (dailyProvisioning) return;
+        dailyProvisioning = true;
+        setVideoStatus('Criando sala Daily...');
+        try {
+          const res = await fetch(getApiUrl('/api/daily/room'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ room_name: 'decision-' + sanitizeRoomName(ROOM.id) })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || 'Falha ao criar sala Daily');
+          if (!data.url) throw new Error('Daily não devolveu a URL da sala');
+          dailyUrlCache = data.url;
+          document.getElementById('videoFrame').src = dailyUrlCache + '?userName=' + videoUserName();
+          setVideoStatus('Sala Daily pronta.');
+        } catch (err) {
+          setVideoStatus('Daily indisponível: ' + err.message + ' — voltando ao Chitchatter.');
+          videoMode = 'chitchatter';
+          paintVideoButtons();
+          document.getElementById('videoFrame').src = buildVideoUrl();
+        } finally {
+          dailyProvisioning = false;
+        }
+        return;
+      }
+      setVideoStatus('');
+      document.getElementById('videoFrame').src = buildVideoUrl();
+    }
+
+    function reconnectVideo() {
+      const old = document.getElementById('videoFrame');
+      const fresh = old.cloneNode(false);
+      if (videoMode === 'daily' && dailyUrlCache) {
+        fresh.src = dailyUrlCache + '?userName=' + videoUserName();
+      } else if (videoMode === 'daily') {
+        old.replaceWith(fresh);
+        setVideoMode('daily');
+        return;
+      } else {
+        fresh.src = buildVideoUrl();
+      }
+      old.replaceWith(fresh);
+    }
+
+    document.getElementById('videoNameInput').addEventListener('change', () => {
+      if (videoMode === 'daily' && dailyUrlCache) {
+        document.getElementById('videoFrame').src = dailyUrlCache + '?userName=' + videoUserName();
+      } else if (videoMode === 'daily') {
+        setVideoMode('daily');
+      } else {
+        document.getElementById('videoFrame').src = buildVideoUrl();
+      }
+    });
+
+    // ================= INVESTIGAR (Agent Zero / 9Router + print) =================
+    function startInvestigar() {
+      const input = document.getElementById('promptInput');
+      input.value = '/investigar ';
+      input.focus();
+    }
+
+    async function handleInvestigar(q) {
+      if (!q) {
+        appendAgentMessage('Informe o que investigar: use o botão 🔍 ou digite /investigar <site ou tema>.');
+        return;
+      }
+      appendUserMessage('/investigar ' + q);
+      const loading = appendLoadingBubble(false);
+      try {
+        const res = await fetch(getApiUrl('/api/investigar'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sala: ROOM.id, client_id: ROOM.clientId, query: q })
+        });
+        const data = await res.json();
+        loading.remove();
+        if (!res.ok) throw new Error(data.detail || 'Falha na investigação');
+        handleToolCall({ type: 'render_investigation', data: { query: data.query, dossier: data.dossier, screenshot_url: data.screenshot_url } });
+      } catch (err) {
+        loading.remove();
+        appendAgentMessage('Erro na investigação: ' + err.message);
+      }
+    }
+
+    // ================= AUTH (Google + onboarding + salas Daily) =================
+    let currentUser = null;
+    let onboardingDismissed = false;
+
+    async function initAuth() {
+      const params = new URLSearchParams(window.location.search);
+      const authErr = params.get('auth_error');
+      if (authErr) {
+        appendAgentMessage('Falha no login com Google: ' + authErr);
+        params.delete('auth_error');
+        const url = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+        window.history.replaceState({}, '', url);
+      }
+      await renderAuth();
+      if (currentUser && !currentUser.onboarded && !onboardingDismissed) {
+        openOnboarding();
+      }
+    }
+
+    async function renderAuth() {
+      const area = document.getElementById('authArea');
+      const loginBtn = '<a href="' + getApiUrl('/api/auth/google/login') + '?sala=' + encodeURIComponent(ROOM.id) + '" class="px-3 py-1.5 rounded-lg bg-white hover:bg-gray-200 text-black text-xs font-bold shadow transition">Entrar com Google</a>';
+      try {
+        const res = await fetch(getApiUrl('/api/auth/me'));
+        const data = await res.json();
+        if (data.logged_in) {
+          currentUser = data.user;
+          area.innerHTML = '<span class="text-gray-300">Olá, <b class="text-gray-100">' + escapeHtml(currentUser.name || currentUser.email) + '</b></span>'
+            + '<button onclick="createRoom()" id="createRoomBtn" class="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-black text-xs font-bold shadow transition">[ + Criar Nova Sala ]</button>'
+            + '<button onclick="logoutAuth()" class="px-2.5 py-1.5 rounded-lg bg-canvasCard hover:bg-canvasBorder border border-canvasBorder text-gray-300 text-xs transition">Sair</button>';
+        } else {
+          currentUser = null;
+          area.innerHTML = loginBtn;
+        }
+      } catch (e) {
+        currentUser = null;
+        area.innerHTML = loginBtn;
+      }
+    }
+
+    async function logoutAuth() {
+      try { await fetch(getApiUrl('/api/auth/logout'), { method: 'POST' }); } catch (e) {}
+      await renderAuth();
+    }
+
+    function openOnboarding() {
+      if (currentUser) document.getElementById('onbName').value = currentUser.name || '';
+      document.getElementById('onbPhone').value = currentUser && currentUser.phone ? maskPhone(currentUser.phone) : '';
+      document.getElementById('onbError').classList.add('hidden');
+      document.getElementById('onboardingModal').classList.remove('hidden');
+      document.getElementById('onbName').focus();
+    }
+
+    function closeOnboarding() {
+      onboardingDismissed = true;
+      document.getElementById('onboardingModal').classList.add('hidden');
+    }
+
+    function maskPhone(v) {
+      const d = v.replace(/\D/g, '').slice(0, 11);
+      if (d.length === 0) return '';
+      if (d.length <= 2) return '(' + d;
+      if (d.length <= 6) return '(' + d.slice(0, 2) + ') ' + d.slice(2);
+      if (d.length <= 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+      return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+    }
+
+    document.getElementById('onbPhone').addEventListener('input', (e) => {
+      e.target.value = maskPhone(e.target.value);
+    });
+
+    async function saveOnboarding() {
+      const name = document.getElementById('onbName').value.trim();
+      const phone = document.getElementById('onbPhone').value;
+      const errEl = document.getElementById('onbError');
+      errEl.classList.add('hidden');
+      try {
+        const res = await fetch(getApiUrl('/api/auth/onboarding'), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, phone: phone })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Falha ao salvar');
+        currentUser = data.user;
+        document.getElementById('onboardingModal').classList.add('hidden');
+        await renderAuth();
+        appendAgentMessage('Cadastro completo! Agora você pode criar salas.');
+      } catch (err) {
+        errEl.innerText = err.message;
+        errEl.classList.remove('hidden');
+      }
+    }
+
+    async function createRoom() {
+      if (!currentUser) {
+        window.location.href = getApiUrl('/api/auth/google/login') + '?sala=' + encodeURIComponent(ROOM.id);
+        return;
+      }
+      if (!currentUser.onboarded) { openOnboarding(); return; }
+      const btn = document.getElementById('createRoomBtn');
+      const oldLabel = btn ? btn.innerText : '';
+      if (btn) { btn.disabled = true; btn.innerText = 'Criando...'; }
+      try {
+        const res = await fetch(getApiUrl('/api/rooms'), { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Falha ao criar sala');
+        document.getElementById('roomCardLink').value = data.url;
+        document.getElementById('roomCardWhats').href = 'https://wa.me/?text=' + encodeURIComponent('Olá! Segue o link para nossa reunião: ' + data.url);
+        document.getElementById('roomCardEnter').href = data.url;
+        document.getElementById('roomCardModal').classList.remove('hidden');
+      } catch (err) {
+        appendAgentMessage('Erro ao criar sala: ' + err.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = oldLabel; }
+      }
+    }
+
+    function copyRoomCardLink() {
+      const input = document.getElementById('roomCardLink');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).catch(() => { input.select(); document.execCommand('copy'); });
+      } else { input.select(); document.execCommand('copy'); }
+    }
+
+    function closeRoomCard() {
+      document.getElementById('roomCardModal').classList.add('hidden');
+    }
+
+    // ================= INIT DA SALA =================
+    connectRoomWS();
+    setVideoMode('chitchatter');
+    initMonaco();
+    initAuth();
+  </script>
+
+</body>
+</html>
