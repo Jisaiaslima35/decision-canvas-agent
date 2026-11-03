@@ -183,6 +183,34 @@
         </div>
       </div>
 
+      <!-- AÇÕES RÁPIDAS EXECUTIVAS — métricas REAIS do CRM-Hermes (fonte única da verdade) -->
+      <div class="p-2.5 border-b border-canvasBorder bg-canvasPanel/30">
+        <div class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1.5 flex items-center justify-between gap-2">
+          <span>Ações Rápidas Executivas</span>
+          <button type="button" onclick="refreshMetricsStrip(7)" id="metricsRefreshBtn" class="text-emerald-400 hover:underline text-[10px] whitespace-nowrap">🔄 Atualizar Métricas</button>
+        </div>
+        <div class="flex gap-1.5 overflow-x-auto pb-1" id="quickActionsBar">
+          <button type="button" onclick="runQuickAction('consultas_7d')" data-action="consultas_7d" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>📊</span> Consultas Desta Semana (7D)
+          </button>
+          <button type="button" onclick="runQuickAction('noshow_14d')" data-action="noshow_14d" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>📉</span> Diagnóstico de No-Show / Faltas
+          </button>
+          <button type="button" onclick="runQuickAction('faturamento_30d')" data-action="faturamento_30d" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>💰</span> Faturamento &amp; Previsão
+          </button>
+          <button type="button" onclick="runQuickAction('recorrencia_90d')" data-action="recorrencia_90d" class="whitespace-nowrap text-xs bg-canvasCard hover:bg-canvasBorder text-gray-200 px-2.5 py-1.5 rounded border border-canvasBorder transition flex items-center gap-1.5">
+            <span>🔁</span> Análise de Recorrência &amp; Fidelidade
+          </button>
+          <button type="button" onclick="runQuickAction('sync_tempo_real')" data-action="sync_tempo_real" class="whitespace-nowrap text-xs bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-200 px-2.5 py-1.5 rounded border border-emerald-800 transition flex items-center gap-1.5">
+            <span>🔄</span> Sincronizar Dados em Tempo Real
+          </button>
+        </div>
+        <div id="metricsStrip" class="mt-2 flex flex-wrap gap-1.5 text-[11px] text-gray-400">
+          <span class="text-gray-500">⏳ Carregando métricas do CRM…</span>
+        </div>
+      </div>
+
       <!-- Mensagens / Histórico da Conversação -->
       <div id="chatHistory" class="flex-1 overflow-y-auto p-4 space-y-3.5 text-sm">
         
@@ -660,6 +688,203 @@
       document.getElementById('promptInput').value = templates[index];
       document.getElementById('promptInput').focus();
     }
+
+    // ====== MÉTRICAS REAIS (CRM-Hermes) + AÇÕES RÁPIDAS EXECUTIVAS ======
+    // Fonte única da verdade: /api/v1/metrics/snapshot (CRM :3010) via proxy do canvas.
+    // Nenhum KPI é inventado no front: o que não vier no snapshot aparece como "n/d".
+
+    function currentRoom() {
+      return (typeof ROOM !== 'undefined' && ROOM) ? ROOM : null;
+    }
+
+    function fmtNum(v) {
+      if (v === null || v === undefined || v === '') return 'n/d';
+      if (typeof v === 'number') {
+        return Number.isInteger(v) ? v.toLocaleString('pt-BR') : v.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+      }
+      return String(v);
+    }
+
+    function fmtMoney(v) {
+      if (v === null || v === undefined || v === '') return 'n/d';
+      const n = Number(v);
+      if (Number.isNaN(n)) return String(v);
+      return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+    }
+
+    // trendBadge(atual, anterior, {risk:true}) -> HTML
+    function trendBadge(cur, prev, opts) {
+      const risk = opts && opts.risk;
+      if (cur === null || cur === undefined || prev === null || prev === undefined) return '';
+      const c = Number(cur), p = Number(prev);
+      if (Number.isNaN(c) || Number.isNaN(p)) return '';
+      const delta = c - p;
+      const base = Math.abs(p) > 0 ? Math.abs(delta / p) * 100 : (Math.abs(delta) > 0 ? 100 : 0);
+      if (base < 5) {
+        return '<span class="ml-1 px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300 text-[10px]">Estável ⚪</span>';
+      }
+      const up = delta > 0;
+      if (risk) {
+        return up
+          ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-rose-950/70 text-rose-300 text-[10px]">Pior 🔴</span>'
+          : '<span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 text-[10px]">Melhor 🟢</span>';
+      }
+      return up
+        ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 text-[10px]">Alta 🟢</span>'
+        : '<span class="ml-1 px-1.5 py-0.5 rounded bg-rose-950/70 text-rose-300 text-[10px]">Queda 🔴</span>';
+    }
+
+    function kpiCard(label, value, badge, hint) {
+      return `<div class="px-2 py-1.5 rounded-md bg-canvasCard/70 border border-canvasBorder">
+        <div class="text-[9px] uppercase tracking-wider text-gray-500">${escapeHtml(label)}</div>
+        <div class="text-xs font-semibold text-gray-100">${value}${badge || ''}</div>
+        ${hint ? `<div class="text-[9px] text-gray-500">${escapeHtml(hint)}</div>` : ''}
+      </div>`;
+    }
+
+    function renderMetricsStrip(snap) {
+      const el = document.getElementById('metricsStrip');
+      if (!el) return;
+      if (!snap || !snap.ok) {
+        const erro = (snap && snap.erro) || 'sem retorno do CRM';
+        el.innerHTML = `<span class="text-amber-400">⚠️ Métricas indisponíveis: ${escapeHtml(erro)}</span>`;
+        return;
+      }
+      const f = snap.funil || {};
+      const a = snap.agenda || {};
+      const r = snap.recorrencia || {};
+      const fin = snap.financeiro || {};
+      // 03/11/2026 (sprint Copiloto FDE): trabalho REAL do agente. A agenda
+      // real vem de appointments (status da equipe) — o stage do Kanban NUNCA
+      // vira agendamento.
+      const fde = snap.fde_operacao || {};
+      const fdeC = fde.contatos || {};
+      const fdeM = fde.midia || {};
+      const fdeImg = fdeM.imagens || {};
+      const fdeAud = fdeM.audios || {};
+      const fdeAg = fde.agenda_real || {};
+      const agendaReal = (fdeAg.confirmadas_por_equipe !== null && fdeAg.confirmadas_por_equipe !== undefined)
+        ? fdeAg.confirmadas_por_equipe : a.realizadas;
+      const alertas = (snap.alertas || []).length;
+      const cards = [
+        kpiCard('Leads novos (' + (snap.janela_dias || 7) + 'd)', fmtNum(f.novos_leads),
+          trendBadge(f.novos_leads, f.novos_leads_periodo_anterior), 'vs ' + fmtNum(f.novos_leads_periodo_anterior) + ' antes'),
+        kpiCard('Conversão', (f.taxa_conversao_pct !== null && f.taxa_conversao_pct !== undefined ? fmtNum(f.taxa_conversao_pct) + '%' : 'n/d'),
+          trendBadge(f.taxa_conversao_pct, f.taxa_conversao_anterior_pct), 'funil de triagem'),
+        kpiCard('Agenda real', fmtNum(agendaReal), '', 'consultas confirmadas pela equipe'),
+        kpiCard('No-show / faltas', fmtNum(a.no_shows_faltas),
+          trendBadge(a.no_shows_faltas, a.faltas_periodo_anterior, { risk: true }), fmtNum(a.consultas_sem_confirmacao_presenca) + ' sem presença'),
+        kpiCard('Recorrentes', fmtNum(r.pacientes_recorrentes), '', fmtNum(r.taxa_adesao_tratamento_pct) + '% adesão'),
+        kpiCard('A receber', fmtMoney(fin.pendente),
+          trendBadge(fin.pendente, fin.pendente_periodo_anterior, { risk: true }), 'ticket ' + fmtMoney(fin.ticket_medio)),
+        kpiCard('Confirmado', fmtMoney(fin.confirmado),
+          trendBadge(fin.confirmado, fin.confirmado_periodo_anterior), 'na janela'),
+        kpiCard('Alertas', fmtNum(alertas), alertas ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 text-[10px]">⚠️</span>' : '', 'operacionais'),
+        kpiCard('Contatos chegaram', fmtNum(fdeC.falaram), '', (snap.janela_dias || 7) + 'd · ' + fmtNum(fdeC.atendidos_pela_equipe) + ' atendidos pela equipe'),
+        kpiCard('Sem retorno', fmtNum(fdeC.sem_retorno), '', 'conversas abertas da equipe'),
+        kpiCard('Mídia auditada', fmtNum(fdeAud.transcritos) + ' áudio', '', fmtNum(fdeImg.com_analise_real) + ' imagem(ns) com análise real · ' + fmtNum(fdeImg.comprovantes_pix) + ' Pix'),
+        kpiCard('Imagens sem conteúdo', fmtNum(fdeImg.sem_conteudo_util), '', 'bot não descreveu a imagem')
+      ].join('');
+      el.innerHTML = cards;
+    }
+
+    async function refreshMetricsStrip(daysBack) {
+      const el = document.getElementById('metricsStrip');
+      const room = currentRoom();
+      const btn = document.getElementById('metricsRefreshBtn');
+      if (el) el.innerHTML = '<span class="text-gray-500">⏳ Sincronizando com o CRM…</span>';
+      if (btn) btn.disabled = true;
+      try {
+        const qs = new URLSearchParams({ days_back: String(daysBack || 7) });
+        if (room && room.id) qs.set('sala', room.id);
+        const res = await fetch(getApiUrl('/api/v1/metrics/snapshot') + '?' + qs.toString());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        data.ok = true;
+        renderMetricsStrip(data);
+        return data;
+      } catch (err) {
+        if (el) el.innerHTML = `<span class="text-amber-400">⚠️ Falha ao sincronizar métricas: ${escapeHtml(err.message)}</span>`;
+        return null;
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    // 02/11/2026 (sprint dedetizacao): rotulos das acoes rapidas acompanham o
+    // negocio da sala (dedetizacao vs clinica). Os IDs nao mudam - so o texto.
+    async function applyQuickActionLabels() {
+      try {
+        const sala = (typeof ROOM !== 'undefined' && ROOM) ? ROOM.id : null;
+        const res = await fetch(getApiUrl('/api/v1/decision/quick-actions') + (sala ? ('?sala=' + encodeURIComponent(sala)) : ''));
+        if (!res.ok) return;
+        const data = await res.json();
+        const bar = document.getElementById('quickActionsBar');
+        if (!bar || !Array.isArray(data.acoes)) return;
+        data.acoes.forEach(acao => {
+          const btn = bar.querySelector('button[data-action="' + acao.id + '"]');
+          if (!btn) return;
+          const icon = acao.icon || '';
+          const txt = acao.text || acao.label || '';
+          btn.textContent = '';
+          const span = document.createElement('span');
+          span.textContent = icon;
+          btn.appendChild(span);
+          btn.appendChild(document.createTextNode(' ' + txt));
+          btn.title = acao.label || txt;
+        });
+      } catch (e) {
+        console.warn('Nao foi possivel ajustar rotulos das acoes rapidas:', e);
+      }
+    }
+
+    async function runQuickAction(action) {
+      const room = currentRoom();
+      const bar = document.getElementById('quickActionsBar');
+      const btns = bar ? Array.from(bar.querySelectorAll('button')) : [];
+      btns.forEach(b => { b.disabled = true; b.classList.add('opacity-50'); });
+      const loading = appendLoadingBubble(false);
+      try {
+        const payload = {
+          action: action,
+          sala: room ? room.id : null,
+          client_id: room ? room.clientId : null,
+          model: state.model,
+          context: {
+            business_notes: document.getElementById('businessContextInput').value,
+            topic: 'Centro de Decisões / Análise executiva com métricas reais do CRM'
+          }
+        };
+        const res = await fetch(getApiUrl('/api/v1/decision/quick-action'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const raw = await res.text();
+          throw new Error('servidor respondeu ' + res.status + ': ' + raw.slice(0, 120));
+        }
+        const data = await res.json();
+        loading.remove();
+        if (data.metricas) renderMetricsStrip(data.metricas);
+        appendAgentMessage(data.reply || 'Análise executiva concluída.');
+        if (data.tool_call) handleToolCall(data.tool_call);
+        state.history.push({ role: 'user', content: '[ação rápida: ' + action + ']' });
+        state.history.push({ role: 'assistant', content: data.reply || '' });
+      } catch (err) {
+        loading.remove();
+        appendAgentMessage('Erro na ação rápida: ' + err.message);
+      } finally {
+        btns.forEach(b => { b.disabled = false; b.classList.remove('opacity-50'); });
+      }
+    }
+
+    // Carrega o strip de métricas assim que a sala abre
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => refreshMetricsStrip(7), 600);
+      setTimeout(() => applyQuickActionLabels(), 200);
+    });
 
     // ====== ENVIO DO CHAT COM IMAGEM & 9ROUTER ======
     async function handleChatSubmit(e) {
@@ -1566,6 +1791,26 @@
 
     // ================= VÍDEO (Chitchatter / Daily.co) =================
     let videoMode = 'chitchatter';
+    // Daily sem chave: esconde o botao e fica no Chitchatter em silencio
+    // (sem tentativa de criacao, sem aviso de erro). Status usa a mesma
+    // resolucao de chave do servidor (env ou daily.env).
+    let dailyAvailable = true;
+    (async () => {
+      try {
+        const r = await fetch(getApiUrl('/api/daily/status'));
+        const d = await r.json();
+        dailyAvailable = !!d.available;
+      } catch (e) { dailyAvailable = false; }
+      if (!dailyAvailable) {
+        const b = document.getElementById('videoBtnDaily');
+        if (b) b.style.display = 'none';
+        if (videoMode === 'daily') {
+          videoMode = 'chitchatter';
+          paintVideoButtons();
+          document.getElementById('videoFrame').src = buildVideoUrl();
+        }
+      }
+    })();
 
     function sanitizeRoomName(raw) {
       return (raw || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
@@ -1593,6 +1838,13 @@
     let dailyProvisioning = false;
 
     async function setVideoMode(mode) {
+      // Sem chave Daily: nem tenta — volta ao Chitchatter em silencio.
+      if (mode === 'daily' && !dailyAvailable) {
+        videoMode = 'chitchatter';
+        paintVideoButtons();
+        document.getElementById('videoFrame').src = buildVideoUrl();
+        return;
+      }
       videoMode = mode;
       paintVideoButtons();
       if (mode === 'daily') {

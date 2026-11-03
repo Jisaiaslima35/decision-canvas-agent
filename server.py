@@ -67,6 +67,175 @@ def get_ninerouter_key() -> str:
 
 NINEROUTER_KEY = get_ninerouter_key()
 
+# ============================================================================
+# FONTE ÚNICA DA VERDADE — métricas do CRM-Hermes (:3010)
+# ============================================================================
+CRM_METRICS_URL = os.getenv("CRM_METRICS_URL", "http://127.0.0.1:3010/api/v1/metrics/snapshot")
+
+
+def _load_internal_token() -> str:
+    """Token interno do cofre Hermes. NUNCA é logado nem devolvido em resposta."""
+    env = os.getenv("CRM_INTERNAL_TOKEN")
+    if env:
+        return env.strip()
+    path = "/root/.hermes/secrets/crm-internal.env"
+    try:
+        if os.path.exists(path):
+            for line in open(path):
+                line = line.strip()
+                if line.startswith("CRM_INTERNAL_TOKEN="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return ""
+
+
+CRM_INTERNAL_TOKEN = _load_internal_token()
+
+_METRICS_CACHE: Dict[str, Dict[str, Any]] = {}
+_METRICS_CACHE_TTL = 60.0
+
+
+_METRICS_HTTP: Optional[httpx.AsyncClient] = None
+
+
+def _metrics_client() -> httpx.AsyncClient:
+    """Cliente HTTP persistente (keep-alive) para o CRM — evita handshake por chamada."""
+    global _METRICS_HTTP
+    if _METRICS_HTTP is None:
+        _METRICS_HTTP = httpx.AsyncClient(
+            timeout=20.0,
+            limits=httpx.Limits(max_keepalive_connections=4, max_connections=8),
+        )
+    return _METRICS_HTTP
+
+
+async def fetch_tenant_metrics(tenant_id: str, days_back: int = 7, use_cache: bool = True) -> Dict[str, Any]:
+    """Snapshot consolidado de métricas no CRM-Hermes (fonte única da verdade).
+
+    Devolve o payload REAL do banco. Em falha devolve {'ok': False, 'erro': ...}
+    — nunca números fictícios.
+    """
+    if not tenant_id or not str(tenant_id).strip():
+        return {"ok": False, "erro": "tenant_id ausente"}
+    try:
+        days_back = max(1, min(90, int(days_back or 7)))
+    except (TypeError, ValueError):
+        days_back = 7
+    key = f"{str(tenant_id).strip()}|{days_back}"
+    now = time.time()
+    if use_cache:
+        cached = _METRICS_CACHE.get(key)
+        if cached and (now - cached["ts"]) < _METRICS_CACHE_TTL:
+            return cached["data"]
+    headers = {"X-Internal-Token": CRM_INTERNAL_TOKEN} if CRM_INTERNAL_TOKEN else {}
+    url = (
+        f"{CRM_METRICS_URL}"
+        f"?tenant_id={urllib.parse.quote(str(tenant_id).strip())}"
+        f"&days_back={days_back}"
+    )
+    try:
+        resp = await _metrics_client().get(url, headers=headers)
+        if resp.status_code == 401:
+            data = {"ok": False, "erro": "token interno recusado pelo CRM (401)"}
+        elif resp.status_code == 404:
+            data = {"ok": False, "erro": "tenant nao encontrado no CRM (404)"}
+        elif resp.status_code != 200:
+            data = {"ok": False, "erro": f"CRM respondeu HTTP {resp.status_code}"}
+        else:
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                data = {"ok": False, "erro": "payload invalido do CRM"}
+            else:
+                payload["ok"] = True
+                payload["janela_dias"] = days_back
+                data = payload
+    except Exception as exc:
+        data = {"ok": False, "erro": f"falha ao consultar CRM: {type(exc).__name__}"}
+    _METRICS_CACHE[key] = {"ts": now, "data": data}
+    return data
+
+
+def tenant_ref_from_sala(sala: Optional[str], explicit: Optional[str] = None) -> Optional[str]:
+    """Deriva a referência do tenant a partir da sala (decision-<slug do tenant>)."""
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    if not sala:
+        return None
+    ref = str(sala).strip()
+    for prefix in ("decision-", "sala-"):
+        if ref.lower().startswith(prefix):
+            ref = ref[len(prefix):]
+            break
+    return ref or None
+
+
+def compact_metrics(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Reduz o snapshot ao essencial para o prompt do JEV (economiza tokens)."""
+    if not snapshot.get("ok"):
+        return {"erro": snapshot.get("erro", "sem dados")}
+    f = snapshot.get("funil_triagem", {}) or {}
+    a = snapshot.get("agenda_consultas", {}) or {}
+    r = snapshot.get("recorrencia_fidelidade", {}) or {}
+    fin = snapshot.get("financeiro_estimado", {}) or {}
+    # 03/11/2026 (sprint Copiloto FDE): trabalho REAL do agente — contatos que
+    # chegaram, atendimento humano x sem retorno, midia auditada e agenda
+    # VERDADEIRA (appointments; nunca leads.stage).
+    fde = snapshot.get("fde_operacao", {}) or {}
+    fd = f.get("detalhe", {}) or {}
+    ad = a.get("detalhe", {}) or {}
+    find = fin.get("detalhe", {}) or {}
+    return {
+        "tenant": snapshot.get("tenant_nome"),
+        "janela_dias": snapshot.get("periodo_dias"),
+        "funil": {
+            "novos_leads": f.get("novos_leads"),
+            "novos_leads_periodo_anterior": fd.get("novos_leads_periodo_anterior"),
+            "em_atendimento": f.get("em_atendimento"),
+            "agendados": f.get("agendados"),
+            "taxa_conversao_pct": f.get("taxa_conversao_pct"),
+            "taxa_conversao_anterior_pct": fd.get("taxa_conversao_periodo_anterior_pct"),
+            "fila_triagem_antiga": fd.get("fila_triagem_antiga"),
+            "total_leads": fd.get("total_leads"),
+        },
+        "agenda": {
+            "total_agendadas": a.get("total_agendadas"),
+            "realizadas": a.get("realizadas"),
+            "no_shows_faltas": a.get("no_shows_faltas"),
+            "cancelamentos": a.get("cancelamentos"),
+            "taxa_realizadas_pct": ad.get("taxa_realizadas_pct"),
+            "consultas_sem_confirmacao_presenca": ad.get("consultas_sem_confirmacao_presenca"),
+            "agendadas_proximos_30d": ad.get("agendadas_proximos_30d"),
+        },
+        "recorrencia": {
+            "pacientes_recorrentes": r.get("pacientes_recorrentes"),
+            "taxa_adesao_tratamento_pct": r.get("taxa_adesao_tratamento_pct"),
+            "pacientes_com_consulta": (r.get("detalhe", {}) or {}).get("pacientes_com_consulta"),
+        },
+        "financeiro": {
+            "confirmado": fin.get("confirmado"),
+            "pendente": fin.get("pendente"),
+            "ticket_medio": fin.get("ticket_medio"),
+            "pendente_total_acumulado": find.get("pendente_total_acumulado"),
+            "projecao_30d": find.get("projecao_30d"),
+            "confirmado_periodo_anterior": find.get("confirmado_periodo_anterior"),
+        },
+        "fde_trabalho_real": {
+            "contatos_falaram": (fde.get("contatos", {}) or {}).get("falaram"),
+            "atendidos_pela_equipe": (fde.get("contatos", {}) or {}).get("atendidos_pela_equipe"),
+            "sem_retorno": (fde.get("contatos", {}) or {}).get("sem_retorno"),
+            "audios_transcritos": ((fde.get("midia", {}) or {}).get("audios", {}) or {}).get("transcritos"),
+            "imagens_com_analise": ((fde.get("midia", {}) or {}).get("imagens", {}) or {}).get("com_analise_real"),
+            "imagens_sem_conteudo": ((fde.get("midia", {}) or {}).get("imagens", {}) or {}).get("sem_conteudo_util"),
+            "comprovantes_pix": ((fde.get("midia", {}) or {}).get("imagens", {}) or {}).get("comprovantes_pix"),
+            "agenda_real_confirmada": (fde.get("agenda_real", {}) or {}).get("confirmadas_por_equipe"),
+            "agenda_real_derivada_do_kanban": (fde.get("agenda_real", {}) or {}).get("derivado_do_kanban"),
+        },
+        "alertas": snapshot.get("alertas_operacionais", []),
+        "insights": snapshot.get("jev_insights", []),
+    }
+
+
 # Templates Oficiais do Centro de Decisões
 SYSTEM_TEMPLATES = [
     {
@@ -113,201 +282,24 @@ SYSTEM_TEMPLATES = [
     }
 ]
 
-def simulate_decision_engine(prompt: str, context: Optional[Dict[str, Any]] = None, has_image: bool = False) -> Dict[str, Any]:
-    """Fallback Autônomo com suporte a visão e schemas estruturados em PT-BR."""
-    p_lower = prompt.lower()
-    
-    if has_image or any(k in p_lower for k in ["imagem", "print", "tela", "interface", "foto", "botão", "onde está", "onde fica", "captura"]):
-        return {
-            "reply": (
-                "Analisei a captura de tela enviada com sucesso.\n\n"
-                "**Diagnóstico Visual da Interface:**\n"
-                "1. **Painel Superior / Barra de Ações:** Os botões de ação e status foram identificados.\n"
-                "2. **Fluxo Recomendado (Passo a Passo):**\n"
-                "   - **Passo 1:** Localize o botão principal de ação em destaque.\n"
-                "   - **Passo 2:** Verifique os parâmetros e métricas antes de confirmar.\n"
-                "   - **Passo 3:** Conclua a operação acompanhando os KPIs no Canvas.\n\n"
-                "Gerei um **Plano de Navegação e Ajuste Operacional** na sua Área de Trabalho para orientar a equipe sem sobrecarga."
-            ),
-            "tool_call": {
-                "type": "render_action_plan",
-                "data": {
-                    "title": "Guia Visual de Execução na Interface (Passo a Passo)",
-                    "objective": "Orientar a navegação e execução de ações críticas a partir da análise visual do print",
-                    "kpis": [
-                        {"name": "Tempo até a Ação", "target": "< 30s", "current": "1m 45s"},
-                        {"name": "Taxa de Erro de Clique", "target": "0%", "current": "18%"},
-                        {"name": "Aderência ao Fluxo", "target": "100%", "current": "65%"}
-                    ],
-                    "phases": [
-                        {
-                            "phase": "Passo 1: Localização e Ativação",
-                            "goal": "Acessar o elemento correto identificado na captura de tela",
-                            "tasks": [
-                                {"task": "Clicar no botão principal identificado na interface", "owner": "Usuário / Operador", "deadline": "Imediato", "status": "pending"},
-                                {"task": "Validar feedback visual de carregamento ou transição de tela", "owner": "Sistema", "deadline": "Imediato", "status": "pending"}
-                            ]
-                        },
-                        {
-                            "phase": "Passo 2: Execução Sem Sobrecarga",
-                            "goal": "Preencher apenas os campos essenciais sem dispersão",
-                            "tasks": [
-                                {"task": "Confirmar valores ou parâmetros apresentados na janela", "owner": "Operador", "deadline": "D+0", "status": "pending"}
-                            ]
-                        }
-                    ],
-                    "executive_summary": "Análise visual processada. A interface foi mapeada com os pontos de clique destacados."
-                }
-            }
-        }
-    
-    if any(k in p_lower for k in ["leitor", "livro", "ebook", "capítulo", "capitulo", "resumo", "estudo", "breakdown"]):
-        topic_name = (context.get("topic") if context else None) or "Modelos Recorrentes & Retenção de Alunos"
-        return {
-            "reply": (
-                "Concluí a decomposição estratégica da leitura com foco em aplicação prática. "
-                "Em vez de apenas memorizar texto, estruturei na sua **Área de Trabalho** os pontos "
-                "críticos de fricção e um checklist de implementação imediata para as próximas 48 horas."
-            ),
-            "tool_call": {
-                "type": "render_study_breakdown",
-                "data": {
-                    "title": "Síntese Executiva & Aplicação Prática - Leitor Inteligente",
-                    "chapter_or_topic": str(topic_name),
-                    "core_insights": [
-                        {
-                            "concept": "Alavancagem de Margem por Leitor",
-                            "takeaway": "Monetização direta de R$ 5 a 13 por livro com Professor IA ativo como gatilho de alto engajamento."
-                        },
-                        {
-                            "concept": "Loop de Retenção Contínua",
-                            "takeaway": "O hábito de estudo diário ancorado em checklists práticos reduz o churn em mais de 40%."
-                        },
-                        {
-                            "concept": "Transformação da Teoria em Operação",
-                            "takeaway": "Cada capítulo lido deve gerar um artefato operacional ou automação no mesmo dia."
-                        }
-                    ],
-                    "critical_friction_points": [
-                        "Usuários encerram a sessão antes do final do capítulo se não houver síntese auditiva.",
-                        "Ausência de integração automática dos insights com o WhatsApp ou CRM do cliente."
-                    ],
-                    "actionable_checklist": [
-                        {"step": "Ativar gatilho de síntese de voz ao completar 80% do capítulo", "done": False},
-                        {"step": "Disparar webhook para CRM com os 3 aprendizados principais do usuário", "done": False},
-                        {"step": "Validar métrica de tempo de leitura ativa no dashboard de analytics", "done": True}
-                    ],
-                    "reflection_questions": [
-                        "Qual processo da sua empresa pode ser melhorado hoje com este princípio?",
-                        "Seus clientes estão recebendo o valor principal nos primeiros 5 minutos de uso?"
-                    ]
-                }
-            }
-        }
-    
-    elif any(k in p_lower for k in ["auditoria", "prioriza", "gargalo", "churn", "inativ", "problema", "recupera", "hallazgo", "matriz", "riesgo"]):
-        return {
-            "reply": (
-                "Realizei o cruzamento dos dados de negócio e identifiquei os **3 gargalos prioritários** "
-                "com base no impacto financeiro direto. "
-                "Gerei a **Matriz de Auditoria e Decisão** no seu Canvas à direita com a exposição de risco calculada "
-                "e as ações de choque recomendadas."
-            ),
-            "tool_call": {
-                "type": "render_decision_matrix",
-                "data": {
-                    "title": "Matriz de Auditoria de Gargalos & Recuperação de Clientes",
-                    "total_risk_exposure": "R$ 48.200 / mês",
-                    "immediate_opportunity": "R$ 29.500 / mês",
-                    "findings": [
-                        {
-                            "rank": 1,
-                            "title": "Clientes Chave Inativos com Risco Iminente de Churn",
-                            "economic_impact": "Alto (Perda projetada de R$ 18.000/mês)",
-                            "evidence": "23 contas enterprise sem nenhuma interação ou leitura nos últimos 28 dias.",
-                            "why_care": "O custo de reativação imediata é 80% menor do que o CAC para substituí-los.",
-                            "pre_decision_check": "Conferir tickets de suporte abertos e taxa de entrega das notificações antes do contato.",
-                            "recommended_action": "Disparar playbook de resgate VIP com oferta de consultoria individual em 24h.",
-                            "status": "urgente"
-                        },
-                        {
-                            "rank": 2,
-                            "title": "Fricção e Abandono no Checkout de Assinaturas (Asaas/Gateway)",
-                            "economic_impact": "Médio (R$ 11.500/mês em vendas retidas)",
-                            "evidence": "Taxa de desistência de 34% no último passo de emissão de PIX dinâmico.",
-                            "why_care": "Tráfego e intenção de compra já pagos sendo perdidos na porta de entrada.",
-                            "pre_decision_check": "Inspecionar webhooks de erro do gateway e logs de recusa de transações.",
-                            "recommended_action": "Ativar recuperação imediata via WhatsApp com link direto de pagamento em 2 cliques.",
-                            "status": "alerta"
-                        },
-                        {
-                            "rank": 3,
-                            "title": "Ociosidade e Custo Fixo de Infraestrutura Noturna",
-                            "economic_impact": "Otimização de R$ 3.200/mês",
-                            "evidence": "Workers de processamento e instâncias mantidas em pico com 5% de uso entre 00h e 06h.",
-                            "why_care": "Drena a margem líquida da operação sem trazer benefício para o usuário.",
-                            "pre_decision_check": "Mapear dependências de jobs batch e rotinas de backup agendadas.",
-                            "recommended_action": "Programar escalonamento automático de contêineres e hibernação de réplicas.",
-                            "status": "oportunidade"
-                        }
-                    ]
-                }
-            }
-        }
-    
-    else:
-        return {
-            "reply": (
-                "Estruturei o plano de ação executivo para os próximos 30 dias focado em resultados mensuráveis. "
-                "O plano foi dividido em 3 fases progressivas (Diagnóstico/Estancamento, Execução do Choque e Escala), "
-                "com metas claras, responsáveis e KPIs de acompanhamento. "
-                "Você pode interagir e marcar as tarefas diretamente no seu **Área de Trabalho** à direita."
-            ),
-            "tool_call": {
-                "type": "render_action_plan",
-                "data": {
-                    "title": "Plano de Ação Estratégico de Choque (30 Dias)",
-                    "objective": "Acelerar conversão, estancar churn e consolidar alavancagem operacional com suporte de IA",
-                    "kpis": [
-                        {"name": "Taxa de Retenção", "target": "> 85%", "current": "64%"},
-                        {"name": "MRR Recuperado", "target": "+ R$ 14.500", "current": "R$ 0"},
-                        {"name": "Tempo Médio de Ativação", "target": "< 4 min", "current": "14 min"}
-                    ],
-                    "phases": [
-                        {
-                            "phase": "Fase 1: Dias 1 a 7 (Diagnóstico e Estancamento)",
-                            "goal": "Conter vazamentos imediatos de receita e restabelecer contato com contas críticas",
-                            "tasks": [
-                                {"task": "Auditoria de churn dos últimos 60 dias e lista de contatos VIP", "owner": "Ops / Isaías", "deadline": "D+2", "status": "pending"},
-                                {"task": "Revisão e teste dos webhooks de pagamento com fallback via WhatsApp", "owner": "Dev / IA", "deadline": "D+4", "status": "pending"},
-                                {"task": "Configuração da mensagem de boas-vindas do Professor IA", "owner": "Growth", "deadline": "D+6", "status": "pending"}
-                            ]
-                        },
-                        {
-                            "phase": "Fase 2: Dias 8 a 21 (Execução do Plano de Choque)",
-                            "goal": "Implementar esteira de reativação automatizada e otimização do fluxo do cliente",
-                            "tasks": [
-                                {"task": "Campanha de recuperação de clientes inativos com playbook personalizado", "owner": "Comercial", "deadline": "D+10", "status": "pending"},
-                                {"task": "Deploy do Decision Canvas como widget de acompanhamento interno", "owner": "Dev / IA", "deadline": "D+14", "status": "completed"},
-                                {"task": "Análise da taxa de conversão semanal e ajustes de preço/oferta", "owner": "Isaías", "deadline": "D+18", "status": "pending"}
-                            ]
-                        },
-                        {
-                            "phase": "Fase 3: Dias 22 a 30 (Consolidação e Escala)",
-                            "goal": "Automatizar gatilhos preditivos de retenção e documentar processos operacionais",
-                            "tasks": [
-                                {"task": "Definir alertas automáticos de contas em risco de abandono", "owner": "Dev / IA", "deadline": "D+24", "status": "pending"},
-                                {"task": "Reunião de fechamento de KPIs e definição das metas do próximo ciclo", "owner": "Isaías / Diretoria", "deadline": "D+29", "status": "pending"}
-                            ]
-                        }
-                    ],
-                    "executive_summary": (
-                        "Este plano prioriza liquidez rápida na primeira semana, mitigação de riscos operacionais "
-                        "e consolidação da arquitetura de inteligência para permitir escalabilidade sem aumento de headcount."
-                    )
-                }
-            }
-        }
+def unavailable_decision_response(erro: str) -> Dict[str, Any]:
+    """Resposta honesta quando o motor real (9Router) não respondeu.
+
+    REGRA DO PROJETO: nunca inventar KPI, taxa ou projeção. Se o motor falhou,
+    a Sala de Decisões declara que não tem dado em vez de fabricar números.
+    """
+    return {
+        "reply": (
+            "⚠️ **Motor de análise indisponível**\n\n"
+            f"Não consegui executar a análise porque o serviço de IA não respondeu ({erro}).\n\n"
+            "Por política de integridade, **não vou inventar indicadores** — qualquer número aqui seria falso.\n\n"
+            "**O que fazer:** clique em 🔄 *Sincronizar Dados em Tempo Real* para conferir se a API de métricas do CRM "
+            "está de pé e tente de novo em instantes."
+        ),
+        "tool_call": None,
+        "sem_dados": True,
+    }
+
 
 async def call_9router_chat(
     prompt: str,
@@ -563,21 +555,49 @@ async def decision_chat(req: ChatRequest):
 
     response = None
 
-    # 1. Rota primária: 9Router oficial da VPS
-    if req.model != "autonomous-engine":
-        logger.info(f"Roteando para 9Router (modelo: {req.model}, tem_imagem={bool(req.image)})...")
-        response = await call_9router_chat(
-            prompt=prompt,
-            model=req.model or "gemini/gemini-2.5-flash",
-            image_base64=req.image,
-            context=req.context,
-            history=req.history
+    # --- Fonte única da verdade: injeta o snapshot real do CRM no contexto ----
+    metrics = None
+    ctx = dict(req.context or {})
+    tenant_ref = tenant_ref_from_sala(req.sala, ctx.get("tenant_id"))
+    if tenant_ref:
+        metrics = await fetch_tenant_metrics(tenant_ref, ctx.get("days_back") or 7)
+        if metrics.get("ok"):
+            ctx["metricas_crm"] = compact_metrics(metrics)
+        else:
+            logger.warning(f"Snapshot indisponivel para {tenant_ref}: {metrics.get('erro')}")
+    req.context = ctx
+
+    system_suffix = None
+    if metrics and metrics.get("ok"):
+        system_suffix = (
+            "CONTEXTO DE DADOS (fonte unica da verdade = API de metricas do CRM-Hermes): os numeros abaixo foram "
+            "lidos do banco agora. Use EXCLUSIVAMENTE esses numeros. Se um indicador nao estiver no snapshot, "
+            "escreva 'nao disponivel' - NUNCA invente KPI, taxa ou projecao. "
+            "Responda em 3 blocos limpos: (1) Diagnostico atual com os numeros; (2) Tendencia comparando com o "
+            "periodo anterior, marcando Alta \U0001F7E2 ou Queda \U0001F534; (3) Plano de acao prescritivo (3 a 5 "
+            "acoes) enderecado ao Dr. Matheus e a Beatriz, com responsavel, prazo em dias e o KPI a mover."
         )
 
-    # 2. Fallback Autônomo com tolerância total a falhas
+    # 1. Rota primária: 9Router oficial da VPS
+    model = req.model or "gemini/gemini-2.5-flash"
+    if model == "autonomous-engine":
+        model = "gemini/gemini-2.5-flash"
+    logger.info(f"Roteando para 9Router (modelo: {model}, tem_imagem={bool(req.image)})...")
+    response = await call_9router_chat(
+        prompt=prompt,
+        model=model,
+        image_base64=req.image,
+        context=req.context,
+        history=req.history,
+        system_suffix=system_suffix,
+    )
+
+    # 2. Falha do motor: resposta honesta (política de integridade - sem KPI fictício)
     if not response:
-        logger.info("Acionando Fallback Autonomous Decision Engine...")
-        response = simulate_decision_engine(prompt, req.context, has_image=bool(req.image))
+        logger.warning("9Router indisponivel - respondendo sem KPIs (politica de integridade)")
+        response = unavailable_decision_response("9Router sem resposta")
+    if metrics and metrics.get("ok"):
+        response["metricas"] = compact_metrics(metrics)
 
     # Broadcast da sala: os demais participantes veem a conversa e o canvas.
     if response and req.sala:
@@ -590,6 +610,272 @@ async def decision_chat(req: ChatRequest):
             await manager.broadcast(req.sala, {"type": "canvas", "tool_call": response["tool_call"]}, exclude=req.client_id)
 
     return response
+
+# ============================================================================
+# AÇÕES RÁPIDAS (Sala de Decisões) — dados reais do CRM, zero KPI fictício
+# ============================================================================
+QUICK_ACTION_SYSTEM = (
+    "Voce e o Centro de Decisoes Empresariais. Os numeros vem da API de metricas do CRM-Hermes (fonte unica da "
+    "verdade) e foram lidos do banco no instante da pergunta. Use EXCLUSIVAMENTE esses numeros; nunca estime ou "
+    "invoe KPI que nao esteja no snapshot - se faltar um indicador, escreva 'nao disponivel'. "
+    "Estruture a resposta em 3 blocos limpos, sem enrolacao:\n"
+    "1) **Diagnostico atual** - 4 a 6 linhas com os numeros-chave da janela.\n"
+    "2) **Tendencia** - comparacao com o periodo anterior marcando 'Alta \U0001F7E2' ou 'Queda \U0001F534' "
+    "('Estavel \U0001F7F6' quando for o caso).\n"
+    "3) **Plano de acao** - 3 a 5 acoes prescritivas, cada uma com responsavel (so cite pessoas quando o snapshot "
+    "ou o contexto trouxer o nome - caso contrario escreva 'responsavel comercial' / 'equipe tecnica'), prazo em "
+    "dias e o KPI a mover.\n"
+    "Cite os numeros exatos do snapshot. Nunca invente taxa, projecao ou diagnostico."
+)
+
+QUICK_ACTIONS = {
+    "consultas_7d": {
+        "label": "\U0001F4CA Consultas Desta Semana (7D)",
+        "days_back": 7,
+        "foco": "agenda_consultas + funil_triagem",
+        "comando": (
+            "Monte o painel executivo de consultas da semana: quantas consultas foram agendadas, quantas foram "
+            "realizadas e quantas ficaram sem confirmacao de comparecimento, o que isso revela sobre a operacao "
+            "da agenda e qual a acao concreta para Dr. Matheus e Beatriz nos proximos 7 dias."
+        ),
+    },
+    "noshow_14d": {
+        "label": "\U0001F4C9 Diagnostico de No-Show / Faltas",
+        "days_back": 14,
+        "foco": "agenda_consultas.no_shows_faltas + consultas_sem_confirmacao_presenca",
+        "comando": (
+            "Diagnostique no-show e faltas: quantas consultas passaram sem realizacao confirmada, o percentual sobre "
+            "as agendadas, o que o dado permite e o que NAO permite concluir (qualidade do dado) e a rotina de "
+            "confirmacao de presenca para reduzir falta, com acoes para Dr. Matheus e Beatriz."
+        ),
+    },
+    "faturamento_30d": {
+        "label": "\U0001F4B0 Faturamento & Previsao",
+        "days_back": 30,
+        "foco": "financeiro_estimado",
+        "comando": (
+            "Analise o faturamento: confirmado na janela, a receber, ticket medio e a projecao de 30 dias, comparando "
+            "com o periodo anterior. Diga onde esta o gargalo de caixa, o que cobrar de quem e em qual prazo, com "
+            "acoes para Dr. Matheus e Beatriz."
+        ),
+    },
+    "recorrencia_90d": {
+        "label": "\U0001F501 Analise de Recorrencia & Fidelidade",
+        "days_back": 90,
+        "foco": "recorrencia_fidelidade",
+        "comando": (
+            "Analise recorrencia e fidelidade: pacientes recorrentes (2 ou mais consultas), adesao ao tratamento e o "
+            "que isso diz sobre retencao. Proponha um plano de manutencao e reativacao com acoes para Dr. Matheus e "
+            "Beatriz."
+        ),
+    },
+    "sync_tempo_real": {
+        "label": "\U0001F504 Sincronizar Dados em Tempo Real",
+        "days_back": 7,
+        "foco": "snapshot completo (funil + agenda + financeiro)",
+        "comando": (
+            "Confirme a sincronizacao: resuma os numeros atuais do funil, da agenda e do financeiro apos a "
+            "sincronizacao, aponte o alerta operacional mais critico e a proxima acao recomendada."
+        ),
+    },
+}
+
+
+# 02/11/2026 (sprint dedetizacao): o catalogo de acoes rapidas usava vocabulario
+# de clinica (consultas, pacientes). Cada tenant recebe o catalogo do SEU
+# negocio - ids IDENTICOS (o front nao muda), rotulos e comando do prompt
+# ajustados ao tipo de servico.
+QUICK_ACTIONS_DEDETIZACAO = {
+    "consultas_7d": {
+        "label": "\U0001F4CA Servicos da Semana (7D)",
+        "days_back": 7,
+        "foco": "funil_orcamento + agenda_servicos",
+        "comando": (
+            "Monte o painel executivo de servicos da semana: quantos orcamentos foram enviados, quantos servicos "
+            "foram agendados, quantos foram efetivamente realizados e quantos ficaram sem confirmacao, o que isso "
+            "revela sobre a operacao da equipe tecnica e qual a acao concreta para os proximos 7 dias."
+        ),
+    },
+    "noshow_14d": {
+        "label": "\U0001F4C9 Faltas / Servicos Nao Realizados",
+        "days_back": 14,
+        "foco": "servicos_sem_confirmacao + agenda_servicos",
+        "comando": (
+            "Diagnostique faltas e servicos nao realizados: quantos atendimentos agendados passaram sem realizacao "
+            "confirmada, o percentual sobre os agendados, o que o dado permite e o que NAO permite concluir "
+            "(qualidade do dado) e a rotina de confirmacao de presenca para reduzir falta, com acoes para a equipe "
+            "comercial."
+        ),
+    },
+    "faturamento_30d": {
+        "label": "\U0001F4B0 Faturamento & Previsao",
+        "days_back": 30,
+        "foco": "financeiro_estimado",
+        "comando": (
+            "Analise o faturamento: confirmado na janela, a receber, ticket medio e a projecao de 30 dias, comparando "
+            "com o periodo anterior. Diga onde esta o gargalo de caixa, o que cobrar de quem e em qual prazo, com "
+            "acoes para a equipe comercial."
+        ),
+    },
+    "recorrencia_90d": {
+        "label": "\U0001F501 Renovacoes & Fidelidade",
+        "days_back": 90,
+        "foco": "recorrencia_fidelidade",
+        "comando": (
+            "Analise recorrencia e fidelidade: clientes com renovacao semestral de dedetizacao, adesao as manutencoes "
+            "e o que isso diz sobre retencao. Proponha um plano de manutencao e reativacao com acoes concretas."
+        ),
+    },
+    "sync_tempo_real": {
+        "label": "\U0001F504 Sincronizar Dados em Tempo Real",
+        "days_back": 7,
+        "foco": "snapshot completo (funil + agenda + financeiro)",
+        "comando": (
+            "Confirme a sincronizacao: resuma os numeros atuais do funil, da agenda de servicos e do financeiro apos a "
+            "sincronizacao, aponte o alerta operacional mais critico e a proxima acao recomendada."
+        ),
+    },
+}
+
+# Perfis conhecidos -> catalogo. Chave = business_type do tenant.
+QUICK_ACTION_CATALOGS = {
+    "servicos_dedetizacao": QUICK_ACTIONS_DEDETIZACAO,
+}
+
+
+def _split_label(label: str):
+    """(icone, texto) - separa o emoji inicial do rotulo."""
+    s = (label or "").strip()
+    if s and ord(s[0]) > 0x2000:
+        return s[0], s[1:].strip()
+    return "", s
+
+
+async def quick_action_catalog(ref: Optional[str]) -> Dict[str, Any]:
+    """Catalogo de acoes rapidas do tenant (default = clinica)."""
+    catalog = QUICK_ACTIONS
+    if ref:
+        snap = await fetch_tenant_metrics(ref, 1, use_cache=True)
+        if snap.get("ok"):
+            btype = str(snap.get("business_type") or "").strip()
+            if btype in QUICK_ACTION_CATALOGS:
+                catalog = QUICK_ACTION_CATALOGS[btype]
+    return catalog
+
+
+def quick_action_catalog_items(catalog: Dict[str, Any]) -> list:
+    items = []
+    for k, v in catalog.items():
+        icon, text = _split_label(v.get("label", ""))
+        items.append({
+            "id": k,
+            "label": v.get("label", k),
+            "icon": icon,
+            "text": text,
+            "days_back": v.get("days_back", 7),
+            "foco": v.get("foco", ""),
+        })
+    return items
+
+class QuickActionRequest(BaseModel):
+    action: str
+    tenant_id: Optional[str] = None
+    days_back: Optional[int] = None
+    sala: Optional[str] = None
+    client_id: Optional[str] = None
+    model: Optional[str] = "gemini/gemini-2.5-flash"
+    context: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
+@app.get("/api/v1/decision/quick-actions")
+async def list_quick_actions(sala: Optional[str] = None, tenant_id: Optional[str] = None):
+    """Catalogo das Acoes Rapidas (id, rotulo, janela em dias).
+
+    02/11/2026 (sprint dedetizacao): o catalogo acompanha o negocio da sala
+    (ex.: 'Servicos da Semana' na dedetizacao, 'Consultas' na clinica). Os
+    ids NAO mudam - so rotulo e o comando do prompt.
+    """
+    ref = tenant_ref_from_sala(sala, tenant_id)
+    catalog = await quick_action_catalog(ref)
+    return {
+        "ok": True,
+        "tenant_ref": ref,
+        "acoes": quick_action_catalog_items(catalog),
+    }
+
+
+@app.get("/api/v1/metrics/snapshot")
+async def metrics_snapshot_proxy(tenant_id: Optional[str] = None, days_back: int = 7, sala: Optional[str] = None):
+    """Proxy do snapshot de metricas do CRM (mesma fonte de verdade do chat)."""
+    ref = tenant_ref_from_sala(sala, tenant_id)
+    if not ref:
+        raise HTTPException(status_code=400, detail="tenant_id ou sala obrigatorio")
+    snap = await fetch_tenant_metrics(ref, days_back, use_cache=False)
+    if not snap.get("ok"):
+        raise HTTPException(status_code=502, detail=snap.get("erro", "sem metricas"))
+    return snap
+
+
+@app.post("/api/v1/decision/quick-action")
+async def decision_quick_action(req: QuickActionRequest):
+    """Acao Rapida: busca metricas REAIS no CRM e pede a analise executiva ao JEV."""
+    acao = QUICK_ACTIONS.get(req.action)
+    if not acao:
+        raise HTTPException(status_code=404, detail="acao rapida desconhecida")
+    ref = tenant_ref_from_sala(req.sala, req.tenant_id)
+    if not ref:
+        raise HTTPException(status_code=400, detail="sala ou tenant_id obrigatorio")
+    days = int(req.days_back or acao["days_back"])
+    days = max(1, min(90, days))
+    metrics = await fetch_tenant_metrics(ref, days, use_cache=False)
+    if not metrics.get("ok"):
+        return {
+            "reply": unavailable_decision_response(metrics.get("erro", "sem metricas"))["reply"],
+            "tool_call": None,
+            "metricas": None,
+            "erro": metrics.get("erro"),
+            "acao": req.action,
+        }
+    # 02/11/2026 (sprint dedetizacao): o comando e o rotulo seguem o negocio
+    # do tenant (o snapshot agora traz business_type).
+    btype = str(metrics.get("business_type") or "").strip()
+    catalog = QUICK_ACTION_CATALOGS.get(btype, QUICK_ACTIONS)
+    acao = catalog.get(req.action) or acao
+    compacto = compact_metrics(metrics)
+    comando = (
+        f"[acao_rapida={req.action}] janela={days}d | foco={acao['foco']}\n"
+        f"{acao['comando']}\n\n"
+        "Snapshot CRM (fonte unica da verdade, leitura de agora):\n"
+        + json.dumps(compacto, ensure_ascii=False)
+    )
+    ctx = dict(req.context or {})
+    ctx["metricas_crm"] = compacto
+    model = req.model or "gemini/gemini-2.5-flash"
+    if model == "autonomous-engine":
+        model = "gemini/gemini-2.5-flash"
+    response = await call_9router_chat(
+        prompt=comando,
+        model=model,
+        context=ctx,
+        system_suffix=QUICK_ACTION_SYSTEM,
+    )
+    if not response:
+        response = unavailable_decision_response("9Router sem resposta")
+    response["metricas"] = compacto
+    response["acao"] = req.action
+    response["label"] = acao["label"]
+    response["tenant_ref"] = ref
+    response["dias"] = days
+    if req.sala:
+        ROOM_STATE.setdefault(req.sala, {})
+        if response.get("tool_call"):
+            ROOM_STATE[req.sala]["canvas"] = response["tool_call"]
+        await manager.broadcast(req.sala, {"type": "chat", "role": "user", "text": acao["label"]}, exclude=req.client_id)
+        await manager.broadcast(req.sala, {"type": "chat", "role": "assistant", "text": response.get("reply", "")}, exclude=req.client_id)
+        if response.get("tool_call"):
+            await manager.broadcast(req.sala, {"type": "canvas", "tool_call": response["tool_call"]}, exclude=req.client_id)
+    return response
+
 
 @app.post("/api/v1/decision/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
@@ -1064,6 +1350,12 @@ def get_daily_key() -> Optional[str]:
 
 class DailyRoomRequest(BaseModel):
     room_name: str = ""
+
+
+@app.get("/api/daily/status")
+async def daily_status():
+    """Disponibilidade do Daily sem tentar criar sala (o front esconde o botao)."""
+    return {"available": get_daily_key() is not None}
 
 
 @app.post("/api/daily/room")
